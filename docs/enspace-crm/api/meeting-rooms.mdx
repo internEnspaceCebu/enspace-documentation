@@ -1,0 +1,157 @@
+---
+sidebar_position: 2
+---
+
+# Meeting Rooms
+
+## Overview
+
+The Meeting Rooms resource manages the physical meeting spaces available in the Enspace facility. Each meeting room has a name, description, seating capacity, hourly rental rate, and a status indicating its current condition (Available, In Use, Needs Cleaning, Needs Setup).
+
+Meeting rooms are **fully public** — no authentication is required for any operation. They serve as a foundational resource referenced by the **Bookings** resource, which links a booking to a specific meeting room via `meeting_room_id`.
+
+Meeting rooms also have associated **images** stored in the `meeting_room_images` table, which are eager-loaded when querying rooms.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/meeting-rooms` | No | List all meeting rooms (with images) |
+| `POST` | `/api/meeting-rooms` | No | Create a new meeting room |
+| `GET` | `/api/meeting-rooms/{id}` | No | Retrieve a single meeting room (with images) |
+| `PUT/PATCH` | `/api/meeting-rooms/{id}` | No | Update a meeting room |
+| `DELETE` | `/api/meeting-rooms/{id}` | No | Delete a meeting room |
+
+:::caution
+The route `GET /api/meeting-rooms/{meetingRoom}/images` is registered in `api.php` but references a method `images()` on `MeetingRoomController` that **does not exist**. This route will return a 500 error.
+:::
+
+---
+
+### GET /api/meeting-rooms
+
+Returns all meeting rooms with their associated images eager-loaded.
+
+**Response (200):**
+
+```json
+[
+  {
+    "id": 1,
+    "room_name": "Board Room A",
+    "description": "Large meeting room with projector",
+    "capacity": 20,
+    "hourly_rate": "1500.00",
+    "meeting_room_status": "Available",
+    "created_by": null,
+    "updated_by": null,
+    "deleted_by": null,
+    "created_at": "2026-07-01T00:00:00.000000Z",
+    "updated_at": "2026-07-01T00:00:00.000000Z",
+    "meeting_room_images": [
+      {
+        "id": 1,
+        "meeting_room_id": 1,
+        "image": "meeting-room-images/Board Room A/photo1.jpg",
+        "url": "http://localhost/storage/meeting-room-images/Board Room A/photo1.jpg"
+      }
+    ]
+  }
+]
+```
+
+:::note
+Results are **not paginated** — the full collection is returned.
+:::
+
+---
+
+### POST /api/meeting-rooms
+
+Creates a new meeting room.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `room_name` | string | Yes | Name of the meeting room |
+| `description` | string | No | Description of the room |
+| `capacity` | integer | Yes | Maximum number of occupants |
+| `hourly_rate` | numeric | Yes | Cost per hour (decimal) |
+| `meeting_room_status` | enum | No | One of: `In Use`, `Needs Cleaning`, `Needs Setup`, `Available` |
+
+**Response (201):** Returns the created meeting room with eager-loaded images.
+
+---
+
+### GET /api/meeting-rooms/{'{id}'}
+
+Returns a single meeting room by ID with eager-loaded images.
+
+**Response (200):** Meeting room object.
+**Error:** `404` if not found.
+
+---
+
+### PUT/PATCH /api/meeting-rooms/{'{id}'}
+
+Updates a meeting room. All fields are optional (`sometimes` validation).
+
+**Request Body:** Same as `POST`, but all fields are optional.
+
+**Response (200):** Updated meeting room object.
+
+---
+
+### DELETE /api/meeting-rooms/{'{id}'}
+
+Permanently deletes a meeting room. This is a **hard delete** — the record is removed from the database.
+
+:::danger
+Deleting a meeting room will cascade-delete all associated images in `meeting_room_images` due to the `ON DELETE CASCADE` foreign key constraint. However, existing bookings referencing this room will have their `meeting_room_id` set to `NULL` (if `ON DELETE SET NULL` is configured) or will fail if the FK constraint prevents it.
+:::
+
+**Response (204):** No content.
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `meeting_rooms` | Read/Write | Primary table for this resource |
+| `meeting_room_images` | Read (eager-loaded) | Stores images for each room. `meeting_room_id` FK with `ON DELETE CASCADE`. |
+| `bookings` | Indirect | Bookings reference `meeting_rooms` via `meeting_room_id` FK (`ON DELETE CASCADE`). Deleting a room will affect bookings. |
+
+### Relationship Diagram
+
+```
+meeting_rooms (1) ──── (N) meeting_room_images    [CASCADE on delete]
+meeting_rooms (1) ──── (N) bookings               [CASCADE on delete]
+```
+
+### Model: `MeetingRoom`
+
+- **Traits:** `HasFactory`, `SoftDeletes`
+- **Relationships:** `meetingRoomImages()` → `hasMany(MeetingRoomImage::class)`
+- **Soft deletes:** Enabled. Deleted rooms are hidden from queries but not permanently removed unless force-deleted.
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | None | All routes are fully public |
+| **Authorization Policies** | None | No `MeetingRoomPolicy` exists |
+| **Role-Based Access** | None | Any visitor (authenticated or not) can create, edit, or delete meeting rooms |
+
+:::danger
+Meeting rooms can be created, modified, and deleted by anyone without authentication. This should be restricted in production.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | Yes (`unsignedBigInteger`) | No | No FK constraint. Not set by controller. |
+| `updated_by` | Yes (`unsignedBigInteger`) | No | No FK constraint. Not set by controller. |
+| `deleted_by` | Yes (`unsignedBigInteger`) | No | No FK constraint. Not set by controller. |
+
+The `meeting_rooms` table has tracking columns in its schema, but neither the controller nor the model has any logic to populate them from `Auth::id()`. These columns will remain `NULL` for all records.

@@ -1,0 +1,143 @@
+---
+sidebar_position: 3
+---
+
+# Meeting Room Amenities
+
+## Overview
+
+The Meeting Room Amenities resource manages individual amenity items (e.g., projector, whiteboard, webcam) that can be associated with meeting room bookings. Amenities have a name and an availability flag. They are linked to bookings through a many-to-many pivot table (`booking_meeting_room_amenity`).
+
+This resource uses **optional authentication** — guests can access it freely, but if a user is logged in, their identity is resolved and attached to the request.
+
+:::note
+The `GET /api/meeting-room-amenities/{id}` endpoint is **not implemented** — the controller has no `show()` method. Attempting to retrieve a single amenity will return `405 Method Not Allowed`.
+:::
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/meeting-room-amenities` | Optional | List all amenities |
+| `POST` | `/api/meeting-room-amenities` | Optional | Create a new amenity |
+| `PUT/PATCH` | `/api/meeting-room-amenities/{id}` | Optional | Update an amenity |
+| `DELETE` | `/api/meeting-room-amenities/{id}` | Optional | Delete an amenity |
+
+---
+
+### GET /api/meeting-room-amenities
+
+Returns all meeting room amenities.
+
+**Response (200):**
+
+```json
+[
+  {
+    "id": 1,
+    "item_name": "Projector",
+    "is_available": true,
+    "created_at": "2026-07-01T00:00:00.000000Z",
+    "updated_at": "2026-07-01T00:00:00.000000Z"
+  }
+]
+```
+
+:::note
+Results are **not paginated** — the full collection is returned.
+:::
+
+---
+
+### POST /api/meeting-room-amenities
+
+Creates a new amenity.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `item_name` | string | Yes | Name of the amenity |
+| `is_available` | boolean | No | Whether the amenity is currently available (defaults to `true`) |
+
+**Response (201):** Returns the created amenity.
+
+---
+
+### PUT/PATCH /api/meeting-room-amenities/{'{id}'}
+
+Updates an existing amenity. All fields are optional.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `item_name` | string | No | Updated name |
+| `is_available` | boolean | No | Updated availability |
+
+**Response (200):** Updated amenity object.
+**Error:** `404` if not found.
+
+---
+
+### DELETE /api/meeting-room-amenities/{'{id}'}
+
+Permanently deletes an amenity. This is a **hard delete**.
+
+:::danger
+Deleting an amenity will cascade-delete its pivot records in `booking_meeting_room_amenity` due to the `ON DELETE CASCADE` foreign key constraint. Any bookings that had this amenity will lose the association.
+:::
+
+**Response (204):** No content.
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `meeting_room_amenities` | Read/Write | Primary table for amenity records |
+| `booking_meeting_room_amenity` | Read/Write | Pivot table linking amenities to bookings via `belongsToMany` |
+
+### Relationship Diagram
+
+```
+meeting_room_amenities (N) <──── pivot ────> (N) bookings
+                              booking_meeting_room_amenity
+```
+
+### Pivot Table: `booking_meeting_room_amenity`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `booking_id` | foreignId | FK → `bookings.id`, `ON DELETE CASCADE` |
+| `meeting_room_amenity_id` | foreignId | FK → `meeting_room_amenities.id`, `ON DELETE CASCADE` |
+| `created_at` | timestamp | nullable |
+
+Has a **unique composite index** on `(booking_id, meeting_room_amenity_id)` to prevent duplicate associations.
+
+### Model: `MeetingRoomAmenity`
+
+- **Traits:** `HasFactory`, `SoftDeletes`
+- **Relationships:** `bookings()` → `belongsToMany(Booking::class)` with pivot `created_at`
+- **Soft deletes:** Enabled
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | Optional (`OptionalAuthenticate`) | If a bearer token is present, the user is resolved; otherwise proceeds unauthenticated |
+| **Authorization Policies** | None | No `MeetingRoomAmenityPolicy` exists |
+| **Role-Based Access** | None | Any visitor can create, update, or delete amenities |
+
+:::caution
+Although the `OptionalAuthenticate` middleware is applied, there are no authorization checks in the controller. Any visitor — authenticated or not — can modify amenities.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | No | N/A | Table has no tracking columns |
+| `updated_by` | No | N/A | Table has no tracking columns |
+| `deleted_by` | No | N/A | Table has no tracking columns |
+
+The `meeting_room_amenities` table does not have `created_by`, `updated_by`, or `deleted_by` columns. There is no audit trail for who created or modified amenity records.

@@ -1,0 +1,145 @@
+---
+sidebar_position: 8
+---
+
+# Inquiries
+
+## Overview
+
+The Inquiries resource manages customer and user inquiries (support tickets, feedback, or general questions) in the Enspace CRM. Each inquiry is linked to a **User** (required) and optionally to a **Customer**, and includes a subject, message, and contact number.
+
+Inquiries are **fully public** — no authentication is required for any operation.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/inquiry` | No | List all inquiries |
+| `POST` | `/api/inquiry` | No | Create a new inquiry |
+| `GET` | `/api/inquiry/{id}` | No | Retrieve a single inquiry |
+| `PUT/PATCH` | `/api/inquiry/{id}` | No | Update an inquiry |
+| `DELETE` | `/api/inquiry/{id}` | No | Delete an inquiry |
+
+---
+
+### GET /api/inquiry
+
+Returns all inquiries.
+
+**Response (200):**
+
+```json
+[
+  {
+    "id": 1,
+    "users_id": 3,
+    "customer_id": 1,
+    "subject": "Billing question",
+    "message": "I have a question about my latest invoice...",
+    "contact_number": "09171234567",
+    "created_by": null,
+    "updated_by": null,
+    "deleted_by": null,
+    "created_at": "2026-07-15T00:00:00.000000Z",
+    "updated_at": "2026-07-15T00:00:00.000000Z"
+  }
+]
+```
+
+:::note
+Results are **not paginated** — the full collection is returned.
+:::
+
+---
+
+### POST /api/inquiry
+
+Creates a new inquiry.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `users_id` | integer | Yes | FK → `users.id` (the user submitting or associated with the inquiry) |
+| `customer_id` | integer | No | FK → `customers.id` (the related customer) |
+| `subject` | string | Yes | Inquiry subject line |
+| `message` | string | Yes | Full inquiry message |
+| `contact_number` | string | Yes | Contact phone number |
+
+**Response (201):** Returns the created inquiry.
+
+---
+
+### GET /api/inquiry/{'{id}'}
+
+Returns a single inquiry by ID.
+
+**Response (200):** Inquiry object.
+**Error:** `404` if not found.
+
+---
+
+### PUT/PATCH /api/inquiry/{'{id}'}
+
+Updates an inquiry. All fields use `sometimes` validation (only provided fields are updated).
+
+**Request Body:** Same as `POST`, all fields optional.
+
+**Response (200):** Updated inquiry object.
+
+---
+
+### DELETE /api/inquiry/{'{id}'}
+
+Permanently deletes an inquiry. This is a **hard delete**.
+
+**Response (204):** No content.
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `inquiry` | Read/Write | Primary table for inquiry records |
+| `users` | Indirect (FK) | `inquiry.users_id` → `users.id` (`ON DELETE RESTRICT`) |
+| `customers` | Indirect (FK) | `inquiry.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
+
+### Relationship Diagram
+
+```
+inquiry (N) ──FK──> (1) users      [RESTRICT on delete]
+inquiry (N) ──FK──> (1) customers  [SET NULL on delete]
+```
+
+:::note
+The FK constraint `ON DELETE RESTRICT` on `users_id` means a user **cannot be deleted** if they have associated inquiries. This is the only relationship in the system that uses `RESTRICT`.
+:::
+
+### Model: `Inquiry`
+
+- **Traits:** `HasFactory`, `SoftDeletes`
+- **Relationships:**
+  - `user()` → `belongsTo(User::class, 'users_id')`
+  - `customer()` → `belongsTo(Customer::class, 'customer_id')`
+- **Soft deletes:** Enabled. Deleted inquiries are hidden from queries but not permanently removed unless force-deleted.
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | None | All routes are fully public |
+| **Authorization Policies** | None | No `InquiryPolicy` exists |
+| **Role-Based Access** | None | Any visitor can create, view, update, or delete inquiries |
+
+:::danger
+Inquiries can be fully managed by anyone without authentication. Any visitor can read all inquiries, modify them, or delete them. This should be restricted in production.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | Yes (`bigInteger`) | No | No FK constraint. Not set by controller. |
+| `updated_by` | Yes (`bigInteger`) | No | No FK constraint. Not set by controller. |
+| `deleted_by` | Yes (`bigInteger`) | No | No FK constraint. Not set by controller. |
+
+The `inquiry` table has tracking columns in its schema, but neither the controller nor the model has any logic to populate them. These columns will remain `NULL` for all records.

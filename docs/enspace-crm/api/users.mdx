@@ -1,0 +1,227 @@
+---
+sidebar_position: 6
+---
+
+# Users
+
+## Overview
+
+The Users resource manages system users in the Enspace CRM. Users represent staff members, managers, administrators, and guests who interact with the platform. Each user has a role in the hierarchy (Guest → Member → OS Staff → General Manager → Admin → Super Admin), personal details, and an optional link to a Customer record.
+
+The Users resource is **fully authenticated** (`auth:sanctum`) and uses **policy-based authorization** with a detailed role hierarchy that controls who can view, create, update, and delete other users.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/users` | Yes (`auth:sanctum`) | List all users (paginated, 20/page) |
+| `POST` | `/api/users` | Yes (`auth:sanctum`) | Create a new user |
+| `GET` | `/api/users/{id}` | Yes (`auth:sanctum`) | Retrieve a single user |
+| `PUT/PATCH` | `/api/users/{id}` | Yes (`auth:sanctum`) | Update a user |
+| `DELETE` | `/api/users/{id}` | Yes (`auth:sanctum`) | Soft-delete a user |
+
+---
+
+### GET /api/users
+
+Returns a paginated list of all users. Requires `viewAny` policy authorization.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | 1 | Page number |
+
+**Response (200):** Paginated user objects (password and `remember_token` hidden).
+
+---
+
+### POST /api/users
+
+Creates a new user with a specified role. Requires `create` policy authorization plus an additional **role assignment check**.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `customer_id` | integer | No | FK → `customers.id` |
+| `user_role` | enum | Yes | `guest`, `member`, `OS Staff`, `General Manager`, `Admin`, `Super Admin` |
+| `username` | string | Yes | Must be unique |
+| `first_name` | string | Yes | |
+| `last_name` | string | Yes | |
+| `middle_name` | string | No | |
+| `suffix` | string | No | |
+| `email` | string | Yes | Must be unique |
+| `phone_number` | string | No | |
+| `birth_date` | date | No | |
+| `is_active` | boolean | No | Default: `false` |
+| `password` | string | Yes | Will be hashed |
+
+**Response (201):** Returns the created user.
+
+**Additional Validation:**
+The controller checks `getAssignableRoles()` based on the creating user's role. A user can only assign roles at or below their own level in the hierarchy.
+
+---
+
+### GET /api/users/{'{id}'}
+
+Returns a single user by ID. Requires `view` policy authorization.
+
+**Response (200):** User object.
+**Error:** `403` if not authorized, `404` if not found.
+
+---
+
+### PUT/PATCH /api/users/{'{id}'}
+
+Updates a user. Requires `update` policy authorization. The controller also validates the new role against `getAssignableRoles()` if `user_role` is being changed.
+
+**Request Body:** Same as `POST`, all fields optional.
+
+**Response (200):** Updated user object.
+
+---
+
+### DELETE /api/users/{'{id}'}
+
+Soft-deletes a user. Sets `deleted_by` to the authenticated user's ID before calling `delete()`. Requires `delete` policy authorization.
+
+**Response (204):** No content.
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `users` | Read/Write | Primary table for user records |
+| `customers` | Indirect (FK) | `users.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
+| `bookings` | Indirect (FK) | `bookings.user_id` → `users.id` (`ON DELETE SET NULL`) |
+| `contracts` | Indirect (FK) | `contracts.user_id` → `users.id` (`ON DELETE SET NULL`) |
+| `inquiry` | Indirect (FK) | `inquiry.users_id` → `users.id` (`ON DELETE RESTRICT`) |
+| `personal_access_tokens` | Read/Write | Sanctum tokens for API authentication |
+
+### Relationship Diagram
+
+```
+users (1) <──── (N) bookings     [SET NULL on delete]
+users (1) <──── (N) contracts    [SET NULL on delete]
+users (1) <──── (N) inquiry      [RESTRICT on delete]
+users (N) ──FK──> (1) customers  [SET NULL on delete]
+```
+
+### Model: `User`
+
+- **Extends:** `Illuminate\Foundation\Auth\User as Authenticatable`
+- **Traits:** `HasApiTokens`, `HasFactory`, `Notifiable`
+- **Relationships:** `customer()` → `belongsTo(Customer::class)`
+- **Casts:** `user_role` → `UserRole::class` (enum)
+- **Notable:** Does **NOT** use the `SoftDeletes` trait, despite the `users` table having a `deleted_at` column. This means soft-deleted users will **not** be excluded from Eloquent queries.
+
+### User Roles (Enum)
+
+| Role | Value | Level |
+|------|-------|:---:|
+| Guest | `guest` | 0 |
+| Member | `member` | 1 |
+| OS Staff | `OS Staff` | 2 |
+| General Manager | `General Manager` | 3 |
+| Admin | `Admin` | 4 |
+| Super Admin | `Super Admin` | 5 |
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | `auth:sanctum` | Requires a valid Sanctum bearer token |
+| **Authorization Policies** | Yes (`UserPolicy`) | Full policy with role hierarchy on all CRUD operations |
+| **Role-Based Access** | Yes | Detailed hierarchy controls who can view/edit whom |
+
+### UserPolicy Breakdown
+
+The `UserPolicy` implements a role-based hierarchy with integer levels (Guest=0 through SuperAdmin=5).
+
+#### viewAny (List Users)
+
+| Role | Access |
+|------|:---:|
+| `guest` | No |
+| `member` | No |
+| `OS Staff` | Yes |
+| `General Manager` | Yes |
+| `Admin` | Yes |
+| `Super Admin` | Yes |
+
+#### view (View Single User)
+
+| Role | Access |
+|------|:---:|
+| `guest` | Self only |
+| `member` | Self only |
+| `OS Staff` | Anyone |
+| `General Manager` | Anyone |
+| `Admin` | Anyone |
+| `Super Admin` | Anyone |
+
+#### create (Create User)
+
+| Role | Access |
+|------|:---:|
+| `guest` | No |
+| `member` | No |
+| `OS Staff` | Yes |
+| `General Manager` | Yes |
+| `Admin` | Yes |
+| `Super Admin` | Yes |
+
+#### update (Update User)
+
+Guests and Members can only update **themselves**. Higher roles can edit users within their assignable range.
+
+| Acting Role | Can Edit These Roles |
+|-------------|---------------------|
+| `guest` | Self only |
+| `member` | Self only |
+| `OS Staff` | `guest` |
+| `General Manager` | `guest`, `member`, `OS Staff` |
+| `Admin` | `guest`, `member`, `OS Staff`, `General Manager` |
+| `Super Admin` | Everyone |
+
+#### delete (Delete User)
+
+| Role | Access |
+|------|:---:|
+| `guest` | No |
+| `member` | No |
+| `OS Staff` | Users in `getEditableRoles()` |
+| `General Manager` | Users in `getEditableRoles()` |
+| `Admin` | Users in `getEditableRoles()` |
+| `Super Admin` | Users in `getEditableRoles()` |
+
+#### Role Assignment Hierarchy
+
+When creating or updating a user's role, the controller checks `getAssignableRoles()`:
+
+| Acting Role | Can Assign These Roles |
+|-------------|----------------------|
+| `guest` | None |
+| `member` | None |
+| `OS Staff` | `guest`, `member` |
+| `General Manager` | `guest`, `member`, `OS Staff` |
+| `Admin` | `guest`, `member`, `OS Staff`, `General Manager` |
+| `Super Admin` | All roles |
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | Yes (`bigInteger`) | **Yes** (in controller) | Set to `Auth::id()` in `store()` |
+| `updated_by` | Yes (`bigInteger`) | **Yes** (in controller) | Set to `Auth::id()` in `update()` |
+| `deleted_by` | Yes (`bigInteger`) | **Yes** (in controller) | Set to `Auth::id()` in `destroy()` before soft-deleting |
+
+:::note
+Unlike the `Customer` model (which uses `booted()` lifecycle hooks), the `User` controller sets tracking fields **manually** in each action method. The tracking columns in the `users` table have **no FK constraint** to the `users` table.
+:::
+
+:::caution
+The `User` model does **not** use the `SoftDeletes` trait, even though the `users` table has a `deleted_at` column. This means `User::all()` and similar queries will **not** automatically exclude soft-deleted users. The `delete()` method called in the controller will set `deleted_at` via the Eloquent model, but query scopes like `withoutTrashed()` will not be available.
+:::

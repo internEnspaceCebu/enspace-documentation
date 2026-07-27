@@ -1,0 +1,128 @@
+---
+sidebar_position: 1
+---
+
+# Authentication
+
+## Overview
+
+The Authentication endpoints handle user login, registration, and session management for the Enspace CRM 2.0 platform. The system uses **Laravel Sanctum** for token-based authentication. Users receive a plain-text API token upon login or registration, which must be included in the `Authorization: Bearer {token}` header for authenticated requests.
+
+There are three endpoints: `POST /login` for existing users, `POST /register` for new guest users, and `GET /user` for retrieving the currently authenticated user's profile.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `POST` | `/api/login` | No | Authenticate a user and return a Sanctum token |
+| `POST` | `/api/register` | No | Register a new guest user and return a Sanctum token |
+| `GET` | `/api/user` | Yes (`auth:sanctum`) | Return the authenticated user's profile |
+
+---
+
+### POST /api/login
+
+Authenticates a user by email and password.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `email` | string | Yes | The user's email address |
+| `password` | string | Yes | The user's plaintext password |
+
+**Response (200):**
+
+```json
+{
+  "token": "1|abcDEFghIJKlmnoPQRstUVwxYZ..."
+}
+```
+
+**Error Responses:**
+
+- `422` — Validation failed (missing fields)
+- `401` — Invalid credentials (user not found or password mismatch)
+
+**Implementation Details:**
+- Looks up the user by `email` using `User::where('email', ...)`
+- Verifies the password with `Hash::check()`
+- Returns `$user->createToken('api')->plainTextToken`
+
+---
+
+### POST /api/register
+
+Registers a new user with the `Guest` role.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `full_name` | string | Yes | Split into `first_name` and `last_name` (space-delimited) |
+| `email` | string | Yes | Must be unique in the `users` table |
+| `password` | string | Yes | Will be hashed before storage |
+| `phone_number` | string | No | Contact number |
+
+**Response (201):**
+
+Returns the newly created user object and a Sanctum token.
+
+**Implementation Details:**
+- Splits `full_name` on the first space into `first_name` and `last_name`
+- Auto-generates a `username` from the email prefix
+- Always assigns `UserRole::Guest`
+- Sets `is_active` to `false` by default
+
+---
+
+### GET /api/user
+
+Returns the currently authenticated user's full model.
+
+**Headers:**
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {token}` |
+
+**Response (200):**
+
+Returns the full `User` model as JSON (password and `remember_token` are hidden).
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `users` | Read/Write | Primary table for authentication. `login` reads by email. `register` inserts a new row. |
+| `personal_access_tokens` | Read/Write | Sanctum stores issued API tokens here. Auto-managed by the `HasApiTokens` trait. |
+
+### Adjacent Relationships
+
+The `users` table has a nullable foreign key `customer_id` referencing `customers.id` (`ON DELETE SET NULL`). Newly registered guests are not linked to any customer.
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | None for login/register | Both routes are fully public |
+| **Authorization Policies** | None | No `UserPolicy` checks on these endpoints |
+| **Role-Based Access** | None | Anyone can register (assigned `Guest` role automatically) |
+| **Rate Limiting** | None configured | No throttle middleware applied |
+| **Password Hashing** | Yes | Passwords are hashed via Laravel's `hashed` cast on the `password` attribute |
+
+:::caution
+The `/register` endpoint is publicly accessible with no rate limiting. In production, consider adding throttling or CAPTCHA to prevent abuse.
+:::
+
+## Audit Tracking
+
+| Field | Implemented | Details |
+|-------|:---:|---------|
+| `created_by` | No | Not set during registration |
+| `updated_by` | No | Not set on login |
+| `deleted_by` | No | N/A |
+
+:::note
+The `users` table has `created_by`, `updated_by`, and `deleted_by` columns, but the `AuthController` does not populate them. Only the `UserController` sets these fields (see [Users](./users.mdx)).
+:::

@@ -1,0 +1,168 @@
+---
+sidebar_position: 4
+---
+
+# Bookings
+
+## Overview
+
+The Bookings resource manages meeting room reservations in the Enspace CRM. A booking represents a scheduled use of a specific meeting room by a user or customer, including details like the booking date, time range, total amount, status, and payment status.
+
+Bookings have a **many-to-many relationship** with Meeting Room Amenities through the `booking_meeting_room_amenity` pivot table. When creating or updating a booking, you can specify which amenities are needed.
+
+This resource uses **optional authentication** — guests can view and create bookings, but if a user is logged in, their identity is resolved.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/bookings` | Optional | List all bookings (paginated, 20/page) |
+| `POST` | `/api/bookings` | Optional | Create a new booking |
+| `GET` | `/api/bookings/{id}` | Optional | Retrieve a single booking |
+| `PUT/PATCH` | `/api/bookings/{id}` | Optional | Update a booking |
+| `DELETE` | `/api/bookings/{id}` | Optional | Delete a booking |
+| `POST` | `/api/bookings/by-date-range` | Optional | Find bookings within a date range |
+
+---
+
+### GET /api/bookings
+
+Returns a paginated list of all bookings (20 per page).
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | 1 | Page number |
+
+**Response (200):** Paginated booking objects with standard Laravel pagination metadata.
+
+---
+
+### POST /api/bookings
+
+Creates a new booking with optional amenity associations.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `user_id` | integer | No | FK → `users.id` |
+| `customer_id` | integer | No | FK → `customers.id` |
+| `meeting_room_id` | integer | Yes | FK → `meeting_rooms.id` |
+| `booking_name` | string | Yes | Display name for the booking |
+| `booking_email` | string | Yes | Contact email |
+| `booking_phone` | string | Yes | Contact phone |
+| `booking_date` | date | Yes | Date of the booking (`Y-m-d`) |
+| `start_time` | time | Yes | Start time (`H:i`) |
+| `end_time` | time | Yes | End time (`H:i`) |
+| `total_amount` | numeric | Yes | Total cost (decimal) |
+| `booking_status` | enum | No | `No-show`, `Pending`, `Ongoing`, `Completed` (default: `Pending`) |
+| `payment_status` | enum | No | `No Payment`, `Down Payment`, `Full Payment` (default: `No Payment`) |
+| `special_requests` | string | No | Any special requirements |
+| `meeting_room_amenities` | array | No | Array of amenity IDs to attach |
+| `created_by` | integer | No | **Client-provided** (see audit note) |
+| `updated_by` | integer | No | **Client-provided** (see audit note) |
+
+**Response (201):** Returns the created booking.
+
+---
+
+### GET /api/bookings/{'{id}'}
+
+Returns a single booking by ID.
+
+**Response (200):** Booking object.
+**Error:** `404` if not found.
+
+---
+
+### PUT/PATCH /api/bookings/{'{id}'}
+
+Updates a booking. All fields are optional. Amenities are **synced** (replaced) via `sync()`.
+
+**Request Body:** Same as `POST`, all fields optional.
+
+**Response (200):** Updated booking object.
+
+---
+
+### DELETE /api/bookings/{'{id}'}
+
+Permanently deletes a booking. This is a **hard delete**.
+
+**Response (204):** No content.
+
+---
+
+### POST /api/bookings/by-date-range
+
+Finds all bookings within a specified date range, ordered by `booking_date` ascending.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `date_start` | date | Yes | Start of the date range |
+| `date_end` | date | Yes | End of the range (`after_or_equal` `date_start`) |
+
+**Response (200):** Collection of bookings within the range.
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `bookings` | Read/Write | Primary table for booking records |
+| `users` | Indirect (FK) | `bookings.user_id` → `users.id` (`ON DELETE SET NULL`) |
+| `customers` | Indirect (FK) | `bookings.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
+| `meeting_rooms` | Indirect (FK) | `bookings.meeting_room_id` → `meeting_rooms.id` (`ON DELETE CASCADE`) |
+| `meeting_room_amenities` | Read/Write (pivot) | Many-to-many via `booking_meeting_room_amenity` |
+
+### Relationship Diagram
+
+```
+bookings (N) ──FK──> (1) users           [SET NULL on delete]
+bookings (N) ──FK──> (1) customers       [SET NULL on delete]
+bookings (N) ──FK──> (1) meeting_rooms   [CASCADE on delete]
+bookings (N) <──pivot──> (N) meeting_room_amenities
+```
+
+### Model: `Booking`
+
+- **Traits:** `HasFactory`, `SoftDeletes`
+- **Relationships:**
+  - `customer()` → `belongsTo(Customer::class)`
+  - `meetingRoomAmenities()` → `belongsToMany(MeetingRoomAmenity::class)` with pivot `created_at`
+- **Notable:** No `belongsTo(User)` or `belongsTo(MeetingRoom)` relationships defined in the model, despite the FK columns existing in the database.
+- **Soft deletes:** Enabled
+
+### Enums Used
+
+| Enum | Column | Values |
+|------|--------|--------|
+| `BookingStatus` | `booking_status` | `No-show`, `Pending`, `Ongoing`, `Completed` |
+| `PaymentStatus` | `payment_status` | `No Payment`, `Down Payment`, `Full Payment` |
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | Optional (`OptionalAuthenticate`) | If a bearer token is present, the user is resolved; otherwise proceeds unauthenticated |
+| **Authorization Policies** | None | No `BookingPolicy` exists |
+| **Role-Based Access** | None | Any visitor can create, update, or delete bookings |
+
+:::danger
+Bookings can be created, modified, and deleted by anyone without authentication. There is no check to prevent double-booking a meeting room for overlapping time slots.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | Yes (`bigInteger`) | No | **Client-provided** — sent in the request body |
+| `updated_by` | Yes (`bigInteger`) | No | **Client-provided** — sent in the request body |
+| `deleted_by` | Yes (`bigInteger`) | No | **Client-provided** — sent in the request body |
+
+:::danger
+The `created_by`, `updated_by`, and `deleted_by` fields are included in the validation rules for both `store()` and `update()` methods. This means the **client sends these values** in the request body — they are NOT derived from `Auth::id()`. This is a **security vulnerability** as any user can spoof the identity of who created or modified a booking. There is no FK constraint on these columns either.
+:::

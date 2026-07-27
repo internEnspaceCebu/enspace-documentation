@@ -1,0 +1,196 @@
+---
+sidebar_position: 7
+---
+
+# Contracts
+
+## Overview
+
+The Contracts resource manages tenant agreements in the Enspace CRM. A contract links either a **User** or a **Customer** (but never both) and defines the benefits included: free monthly meeting room hours, rented lockers, parking spaces, and other benefits.
+
+Contracts have a lifecycle status (`active` → `renewed` / `expired` / `terminated`) and **cannot be deleted** — attempting to delete a contract throws a `LogicException`. To end a contract, update its status to `terminated` or `expired`.
+
+The `POST /api/contracts/used-hours` endpoint provides a query to calculate how many meeting room hours a contract has consumed in a given month, pulling data from the **Bookings** resource.
+
+This resource is **fully public** — no authentication is required.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/contracts` | No | List all contracts |
+| `POST` | `/api/contracts` | No | Create a new contract |
+| `GET` | `/api/contracts/{id}` | No | Retrieve a single contract |
+| `PUT/PATCH` | `/api/contracts/{id}` | No | Update a contract |
+| `POST` | `/api/contracts/used-hours` | No | Calculate used meeting room hours for a contract |
+
+:::note
+`DELETE /api/contracts/{id}` is **not implemented** — the controller has no `destroy()` method. The model's `boot()` method also throws a `LogicException` on any delete attempt.
+:::
+
+---
+
+### GET /api/contracts
+
+Returns all contracts.
+
+**Response (200):**
+
+```json
+[
+  {
+    "id": 1,
+    "user_id": 5,
+    "customer_id": null,
+    "free_meeting_room_hours_per_month": 10,
+    "lockers_rented": 2,
+    "parking_spaces_rented": 1,
+    "other_benefits": "Free coffee",
+    "status": "active",
+    "created_at": "2026-07-14T00:00:00.000000Z",
+    "updated_at": "2026-07-14T00:00:00.000000Z"
+  }
+]
+```
+
+:::note
+Results are **not paginated** — the full collection is returned.
+:::
+
+---
+
+### POST /api/contracts
+
+Creates a new contract. Enforces **mutual exclusivity** between `user_id` and `customer_id`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `user_id` | integer | Conditional | FK → `users.id`. Must be provided if `customer_id` is not. |
+| `customer_id` | integer | Conditional | FK → `customers.id`. Must be provided if `user_id` is not. |
+| `free_meeting_room_hours_per_month` | integer | No | Default: `0` |
+| `lockers_rented` | integer | No | Default: `0` |
+| `parking_spaces_rented` | integer | No | Default: `0` |
+| `other_benefits` | string | No | Free-text description |
+| `status` | string | Yes | `active`, `renewed`, `expired`, `terminated` |
+
+**Business Rules:**
+- Cannot set **both** `user_id` and `customer_id` — returns `422`
+- **At least one** of `user_id` or `customer_id` must be set — returns `422`
+- Cannot change an existing user contract to a customer contract or vice versa (enforced in `boot()`)
+
+**Response (201):** Returns the created contract.
+
+---
+
+### GET /api/contracts/{'{id}'}
+
+Returns a single contract by ID.
+
+**Response (200):** Contract object.
+**Error:** `404` if not found.
+
+---
+
+### PUT/PATCH /api/contracts/{'{id}'}
+
+Updates a contract. All fields are optional. The `user_id`/`customer_id` mutual exclusivity rules are enforced in the model's `boot()` method.
+
+:::caution
+The `created_by` and `updated_by` fields are included in the validation rules for the `update()` method, meaning they can be set directly by the client. However, the `contracts` table does **not** have these columns in its schema — these values will be silently ignored or cause errors.
+:::
+
+**Response (200):** Updated contract object.
+
+---
+
+### POST /api/contracts/used-hours
+
+Calculates the total meeting room hours consumed by a contract in a given month.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `contract_id` | integer | Yes | FK → `contracts.id` |
+| `month` | string | Yes | Format: `Y-m` (e.g., `2026-07`) |
+
+**Response (200):**
+
+```json
+{
+  "contract_id": 1,
+  "month": "2026-07",
+  "total_hours_used": 8,
+  "free_hours_available": 10,
+  "remaining_hours": 2,
+  "bookings": [...]
+}
+```
+
+**Implementation Details:**
+- Looks up the contract, then queries `Booking` records matching the contract's `user_id` or `customer_id` in the specified month
+- Considers bookings with statuses: `COMPLETED`, `ONGOING`, `PENDING`
+- Each booking's duration is rounded up to the nearest 5 minutes, then ceiling-divided to hours
+- Returns the total hours used, free hours from the contract, and remaining hours
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `contracts` | Read/Write | Primary table for contract records |
+| `users` | Indirect (FK) | `contracts.user_id` → `users.id` (`ON DELETE SET NULL`) |
+| `customers` | Indirect (FK) | `contracts.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
+| `bookings` | Read (for used-hours query) | Queried to calculate consumed hours per contract |
+
+### Relationship Diagram
+
+```
+contracts (N) ──FK──> (1) users      [SET NULL on delete]
+contracts (N) ──FK──> (1) customers  [SET NULL on delete]
+contracts (1) <── referenced by ── (N) bookings (via user_id or customer_id)
+```
+
+### Model: `Contract`
+
+- **Traits:** `HasFactory` (no `SoftDeletes`)
+- **Timestamps:** Enabled (`$timestamps = true`)
+- **Relationships:**
+  - `user()` → `belongsTo(User::class)`
+  - `customer()` → `belongsTo(Customer::class)`
+- **Casts:** `status` → `ContractStatus::class` (enum, stored as string in DB)
+- **Boot logic:**
+  - `deleting` → Throws `\LogicException` (contracts **cannot** be deleted)
+  - `saving` → Enforces `user_id`/`customer_id` mutual exclusivity rules
+
+### Contract Status (Enum)
+
+| Status | Value | Description |
+|--------|-------|-------------|
+| Active | `active` | Currently active contract |
+| Renewed | `renewed` | Contract has been renewed |
+| Expired | `expired` | Contract has expired |
+| Terminated | `terminated` | Contract was terminated early |
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | None | All routes are fully public |
+| **Authorization Policies** | None | No `ContractPolicy` exists |
+| **Role-Based Access** | None | Any visitor can view, create, and modify contracts |
+
+:::danger
+Contract details including benefits, rental counts, and status can be viewed and modified by anyone without authentication. This should be restricted in production.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | No | N/A | Table has no tracking columns |
+| `updated_by` | No | N/A | Table has no tracking columns |
+| `deleted_by` | No | N/A | Table has no tracking columns; deletion is blocked at the model level |
+
+The `contracts` table does not have `created_by`, `updated_by`, or `deleted_by` columns in its schema. There is no audit trail for contract modifications.
