@@ -6,13 +6,19 @@ sidebar_position: 7
 
 ## Overview
 
-The Contracts resource manages tenant agreements in the Enspace CRM. A contract links either a **User** or a **Customer** (but never both) and defines the benefits included: free monthly meeting room hours, rented lockers, parking spaces, and other benefits.
+The Contracts resource manages tenant agreements in the Enspace CRM. A contract belongs to a **Customer** and a **Service**, and may optionally be tied to a specific **Unit**.
+
+Each contract records the benefits included: free monthly meeting room hours, rented lockers, parking spaces, and other benefits — plus the **lease details**: branch location, monthly rental rate, security deposit, lease start/end dates, and payment mode.
 
 Contracts have a lifecycle status (`active` → `renewed` / `expired` / `terminated`) and **cannot be deleted** — attempting to delete a contract throws a `LogicException`. To end a contract, update its status to `terminated` or `expired`.
 
-The `POST /api/contracts/used-hours` endpoint provides a query to calculate how many meeting room hours a contract has consumed in a given month, pulling data from the **Bookings** resource.
+The response for every contract includes a derived, read-only **`lease_term`** field (e.g. `"July 12, 2025 to July 18, 2026"`), computed automatically from `date_start` and `date_end` — it is not a real column.
+
+The `POST /api/contracts/used-hours` endpoint calculates how many meeting room hours a contract has consumed in a given month, pulling data from the **Bookings** resource.
 
 This resource is **fully public** — no authentication is required.
+
+See [Architecture](/enspace-crm/architecture) for project conventions.
 
 ## Endpoints
 
@@ -32,7 +38,7 @@ This resource is **fully public** — no authentication is required.
 
 ### GET /api/contracts
 
-Returns all contracts.
+Returns all contracts, with the customer and their users loaded.
 
 **Response (200):**
 
@@ -40,15 +46,24 @@ Returns all contracts.
 [
   {
     "id": 1,
-    "user_id": 5,
-    "customer_id": null,
+    "customer_id": 3,
+    "service_id": 1,
+    "unit_id": null,
     "free_meeting_room_hours_per_month": 10,
     "lockers_rented": 2,
     "parking_spaces_rented": 1,
-    "other_benefits": "Free coffee",
+    "other_benefits": "Free parking",
     "status": "active",
+    "branch_location": "ITP",
+    "monthly_rental_rate": 15000,
+    "security_deposit": 30000,
+    "date_start": "2026-01-01T00:00:00.000000Z",
+    "date_end": "2026-12-31T00:00:00.000000Z",
+    "payment_mode": "monthly_bank_transfer",
+    "lease_term": "January 1, 2026 to December 31, 2026",
     "created_at": "2026-07-14T00:00:00.000000Z",
-    "updated_at": "2026-07-14T00:00:00.000000Z"
+    "updated_at": "2026-07-14T00:00:00.000000Z",
+    "customer": { "id": 3, "company_tenant_name": "NovaQuest Solutions" }
   }
 ]
 ```
@@ -61,32 +76,41 @@ Results are **not paginated** — the full collection is returned.
 
 ### POST /api/contracts
 
-Creates a new contract. Enforces **mutual exclusivity** between `user_id` and `customer_id`.
+Creates a new contract.
 
 **Request Body:**
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `user_id` | integer | Conditional | FK → `users.id`. Must be provided if `customer_id` is not. |
-| `customer_id` | integer | Conditional | FK → `customers.id`. Must be provided if `user_id` is not. |
-| `free_meeting_room_hours_per_month` | integer | No | Default: `0` |
-| `lockers_rented` | integer | No | Default: `0` |
-| `parking_spaces_rented` | integer | No | Default: `0` |
+| `customer_id` | integer | Yes | FK → `customers.id` |
+| `service_id` | integer | Yes | FK → `services.id` (one service can serve many contracts) |
+| `unit_id` | integer | No | FK → `units.id` — a contract can exist before a unit is assigned |
+| `free_meeting_room_hours_per_month` | integer | No | Default: `0`, minimum `0` |
+| `lockers_rented` | integer | No | Default: `0`, minimum `0` |
+| `parking_spaces_rented` | integer | No | Default: `0`, minimum `0` |
 | `other_benefits` | string | No | Free-text description |
 | `status` | string | Yes | `active`, `renewed`, `expired`, `terminated` |
+| `branch_location` | string | Yes | `ITP` or `CBP` (see enum below) |
+| `monthly_rental_rate` | integer | Yes | Minimum `0` |
+| `security_deposit` | integer | Yes | Minimum `0` |
+| `date_start` | date | Yes | Lease start date |
+| `date_end` | date | Yes | Must be on or after `date_start` |
+| `payment_mode` | string | Yes | See enum below |
 
-**Business Rules:**
-- Cannot set **both** `user_id` and `customer_id` — returns `422`
-- **At least one** of `user_id` or `customer_id` must be set — returns `422`
-- Cannot change an existing user contract to a customer contract or vice versa (enforced in `boot()`)
+**Business Rules (service/unit assignment):**
 
-**Response (201):** Returns the created contract.
+- The service must **not be soft-deleted** — otherwise `422` on `service_id`.
+- If a `unit_id` is given, the unit must **not be soft-deleted** and **must belong to the specified service** — otherwise `422` on `unit_id`.
+- The unit must currently be **`available`** (not `occupied`) — otherwise `422` on `unit_id`.
+- `date_end` must be on or after `date_start` — otherwise `422` on `date_end`.
+
+**Response (201):** Returns the created contract, including the derived `lease_term`.
 
 ---
 
 ### GET /api/contracts/{'{id}'}
 
-Returns a single contract by ID.
+Returns a single contract with the customer and their users loaded.
 
 **Response (200):** Contract object.
 **Error:** `404` if not found.
@@ -95,10 +119,12 @@ Returns a single contract by ID.
 
 ### PUT/PATCH /api/contracts/{'{id}'}
 
-Updates a contract. All fields are optional. The `user_id`/`customer_id` mutual exclusivity rules are enforced in the model's `boot()` method.
+Updates a contract. All fields are optional (`sometimes`). The same service/unit assignment rules as `POST` are enforced; when `service_id` is not part of the request, the contract's existing service is used for the check.
+
+**Request Body:** Same fields as `POST`, all optional.
 
 :::caution
-The `created_by` and `updated_by` fields are included in the validation rules for the `update()` method, meaning they can be set directly by the client. However, the `contracts` table does **not** have these columns in its schema — these values will be silently ignored or cause errors.
+The `created_by` and `updated_by` fields are included in the update validation rules, meaning they can be set directly by the client. However, the `contracts` table does **not** have these columns in its schema — these values will be silently ignored or cause errors.
 :::
 
 **Response (200):** Updated contract object.
@@ -130,7 +156,7 @@ Calculates the total meeting room hours consumed by a contract in a given month.
 ```
 
 **Implementation Details:**
-- Looks up the contract, then queries `Booking` records matching the contract's `user_id` or `customer_id` in the specified month
+- Looks up the contract, then queries `Booking` records matching the contract's `customer_id` in the specified month
 - Considers bookings with statuses: `COMPLETED`, `ONGOING`, `PENDING`
 - Each booking's duration is rounded up to the nearest 5 minutes, then ceiling-divided to hours
 - Returns the total hours used, free hours from the contract, and remaining hours
@@ -140,29 +166,33 @@ Calculates the total meeting room hours consumed by a contract in a given month.
 | Table | Access | Description |
 |-------|--------|-------------|
 | `contracts` | Read/Write | Primary table for contract records |
-| `users` | Indirect (FK) | `contracts.user_id` → `users.id` (`ON DELETE SET NULL`) |
-| `customers` | Indirect (FK) | `contracts.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
+| `customers` | Indirect (FK) | `contracts.customer_id` → `customers.id` (`ON DELETE RESTRICT`) |
+| `services` | Indirect (FK) | `contracts.service_id` → `services.id` (`ON DELETE RESTRICT`) |
+| `units` | Indirect (FK) | `contracts.unit_id` → `units.id` (`ON DELETE SET NULL`, nullable) |
 | `bookings` | Read (for used-hours query) | Queried to calculate consumed hours per contract |
 
 ### Relationship Diagram
 
 ```
-contracts (N) ──FK──> (1) users      [SET NULL on delete]
-contracts (N) ──FK──> (1) customers  [SET NULL on delete]
-contracts (1) <── referenced by ── (N) bookings (via user_id or customer_id)
+contracts (N) ──FK──> (1) customers  [RESTRICT on delete]
+contracts (N) ──FK──> (1) services   [RESTRICT on delete]
+contracts (N) ──FK──> (1) units      [SET NULL on delete, nullable]
+contracts (1) <── referenced by ── (N) bookings (via customer_id)
 ```
 
 ### Model: `Contract`
 
 - **Traits:** `HasFactory` (no `SoftDeletes`)
 - **Timestamps:** Enabled (`$timestamps = true`)
+- **Fillable:** `customer_id`, `service_id`, `unit_id`, `free_meeting_room_hours_per_month`, `lockers_rented`, `parking_spaces_rented`, `other_benefits`, `status`, `branch_location`, `monthly_rental_rate`, `security_deposit`, `date_start`, `date_end`, `payment_mode`
+- **Appended (derived):** `lease_term` — read-only, computed from `date_start`/`date_end`
+- **Casts:** `status` → `ContractStatus::class`, `branch_location` → `BranchLocation::class`, `payment_mode` → `PaymentMode::class`, `date_start`/`date_end` → `date`
 - **Relationships:**
-  - `user()` → `belongsTo(User::class)`
   - `customer()` → `belongsTo(Customer::class)`
-- **Casts:** `status` → `ContractStatus::class` (enum, stored as string in DB)
+  - `service()` → `belongsTo(Service::class, 'service_id')`
+  - `unit()` → `belongsTo(Unit::class, 'unit_id')`
 - **Boot logic:**
   - `deleting` → Throws `\LogicException` (contracts **cannot** be deleted)
-  - `saving` → Enforces `user_id`/`customer_id` mutual exclusivity rules
 
 ### Contract Status (Enum)
 
@@ -173,6 +203,35 @@ contracts (1) <── referenced by ── (N) bookings (via user_id or customer
 | Expired | `expired` | Contract has expired |
 | Terminated | `terminated` | Contract was terminated early |
 
+### Branch Location (Enum)
+
+| Status | Value | Label |
+|--------|-------|-------|
+| ITP | `ITP` | IT Park |
+| CBP | `CBP` | Cebu Business Park |
+
+### Payment Mode (Enum)
+
+| Status | Value | Label |
+|--------|-------|-------|
+| MonthlyBankTransfer | `monthly_bank_transfer` | Monthly Bank Transfer |
+| MonthlyCheck | `monthly_check` | Monthly Check |
+| FullyPaidBankTransfer | `fully_paid_bank_transfer` | Fully Paid Bank Transfer |
+| FullyPaidBankCheck | `fully_paid_bank_check` | Fully Paid Bank Check |
+| PDC | `pdc` | PDC (Post Dated Check) |
+| Cash | `cash` | Cash |
+| Other | `other` | Other |
+
+## Known Gaps (for the next set of interns)
+
+The following are **not yet added/implemented** — confirmed against the current codebase:
+
+- **`created_by` / `updated_by` are not real columns** — the update validation accepts them, but the `contracts` table has no such columns, so the values are silently ignored.
+- **No termination/renewal tracking** — the lifecycle is only the `status` enum; there is no `terminated_at`, `renewal_date`, or notes column recording how/when a contract ended, and deletion is fully blocked by design.
+- **`lease_term` is derived, not stored** — there is no raw integer term length or stored copy; it is always computed from `date_start`/`date_end`.
+- **Unit status is not synchronized** — creating/updating a contract only *validates* that a unit is `available`; it never flips the unit's status to `occupied` (see the Known Gaps in [Units](./units)).
+- **Seeding rework pending** — `ContractSeeder` currently creates 6 contracts bound to a placeholder "Default Seeded Service" (because it runs before `ServiceSeeder`); the planned 36 mock contracts (6 per real service) are not yet implemented.
+
 ## Security
 
 | Aspect | Status | Details |
@@ -182,7 +241,7 @@ contracts (1) <── referenced by ── (N) bookings (via user_id or customer
 | **Role-Based Access** | None | Any visitor can view, create, and modify contracts |
 
 :::danger
-Contract details including benefits, rental counts, and status can be viewed and modified by anyone without authentication. This should be restricted in production.
+Contract details including benefits, rental amounts, lease dates, and status can be viewed and modified by anyone without authentication. This should be restricted in production.
 :::
 
 ## Audit Tracking

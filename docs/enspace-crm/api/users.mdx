@@ -96,7 +96,7 @@ Soft-deletes a user. Sets `deleted_by` to the authenticated user's ID before cal
 | `users` | Read/Write | Primary table for user records |
 | `customers` | Indirect (FK) | `users.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
 | `bookings` | Indirect (FK) | `bookings.user_id` → `users.id` (`ON DELETE SET NULL`) |
-| `contracts` | Indirect (FK) | `contracts.user_id` → `users.id` (`ON DELETE SET NULL`) |
+| `contracts` | None | No FK to `users` — contracts link to users only indirectly via `customers` |
 | `inquiry` | Indirect (FK) | `inquiry.users_id` → `users.id` (`ON DELETE RESTRICT`) |
 | `personal_access_tokens` | Read/Write | Sanctum tokens for API authentication |
 

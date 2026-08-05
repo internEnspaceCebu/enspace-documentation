@@ -105,10 +105,10 @@ Updates a meeting room. All fields are optional (`sometimes` validation).
 
 ### DELETE /api/meeting-rooms/{'{id}'}
 
-Permanently deletes a meeting room. This is a **hard delete** — the record is removed from the database.
+Soft-deletes a meeting room. This is a **soft delete** — the record is marked with `deleted_at` but not removed from the database. All associated amenities are detached from the pivot table before deletion.
 
 :::danger
-Deleting a meeting room will cascade-delete all associated images in `meeting_room_images` due to the `ON DELETE CASCADE` foreign key constraint. However, existing bookings referencing this room will have their `meeting_room_id` set to `NULL` (if `ON DELETE SET NULL` is configured) or will fail if the FK constraint prevents it.
+Because this is a soft delete, the `ON DELETE CASCADE` constraints on `meeting_room_images.meeting_room_id` and `bookings.meeting_room_id` do **not** fire — the images and bookings remain in the database. They would only be cascade-removed if the room were hard (force) deleted.
 :::
 
 **Response (204):** No content.

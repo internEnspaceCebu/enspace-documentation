@@ -1,0 +1,254 @@
+---
+sidebar_position: 10
+---
+
+# Units
+
+## Overview
+
+The Units resource manages the **physical units** (offices, desks) that belong to a service. Many units can belong to one service (`units.service_id`), and a contract may optionally reference one specific unit (`contracts.unit_id`).
+
+Each unit has a status driven by the `UnitStatus` enum: `available` or `occupied`. Units use **soft delete** with a `deleted_by` audit trail.
+
+This resource is **admin-level** — **authentication is required** (all routes are inside the `auth:sanctum` middleware group).
+
+See [Architecture](/enspace-crm/architecture) for project conventions.
+
+:::note
+`GET /api/units/available` must be registered **before** the `apiResource('units')` route in `routes/api.php`, otherwise Laravel tries to match `"available"` as a `{unit}` route-model-binding parameter.
+:::
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/units` | Yes | List units (paginated, filterable) |
+| `GET` | `/api/units/available` | Yes | List available units for a service |
+| `POST` | `/api/units` | Yes | Create a new unit |
+| `GET` | `/api/units/{id}` | Yes | Retrieve a single unit |
+| `PUT/PATCH` | `/api/units/{id}` | Yes | Update a unit |
+| `DELETE` | `/api/units/{id}` | Yes | Soft delete a unit |
+
+---
+
+### GET /api/units
+
+Returns all units, **paginated 15 per page**, with the parent `service` eager-loaded.
+
+**Optional query parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `unit_status` | string | Filter by status: `available` or `occupied` (validated against the enum) |
+| `service_id` | integer | Filter by the service the unit belongs to |
+
+**Examples:**
+
+```
+GET /api/units?unit_status=available
+GET /api/units?service_id=1
+GET /api/units?unit_status=occupied&service_id=1
+```
+
+**Response (200):**
+
+```json
+{
+  "current_page": 1,
+  "data": [
+    {
+      "id": 1,
+      "service_id": 1,
+      "unit_name": "G1-1",
+      "capacity": 1,
+      "unit_status": "available",
+      "created_at": "2026-07-27T00:00:00.000000Z",
+      "updated_at": "2026-07-27T00:00:00.000000Z",
+      "service": { "id": 1, "service_name": "Private Office" }
+    }
+  ],
+  "total": 1,
+  "per_page": 15,
+  "last_page": 1
+}
+```
+
+---
+
+### GET /api/units/available
+
+Returns every unit under a given service that is currently **available**. Used by clients to find a substitute unit when the one they wanted is no longer available.
+
+**Query parameter:**
+
+| Param | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `service_id` | integer | Yes | FK → `services.id` |
+
+**Response (200):** Array of available units. Not paginated.
+
+```json
+[
+  {
+    "id": 3,
+    "service_id": 1,
+    "unit_name": "G1-8",
+    "capacity": 1,
+    "unit_status": "available"
+  }
+]
+```
+
+---
+
+### POST /api/units
+
+Creates a new unit.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `service_id` | integer | Yes | FK → `services.id` |
+| `unit_name` | string | Yes | Max 255 characters |
+| `capacity` | integer | Yes | Minimum `1` |
+| `unit_status` | string | Yes | `available` or `occupied` (enum-validated) |
+
+`created_by` is set automatically from the authenticated user.
+
+**Response (201):** Returns the created unit.
+
+---
+
+### GET /api/units/{'{id}'}
+
+Returns a single unit with its parent `service` loaded.
+
+**Response (200):** Unit object.
+**Error:** `404` if not found (including soft-deleted units).
+
+---
+
+### PUT/PATCH /api/units/{'{id}'}
+
+Updates a unit. All fields are optional.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `service_id` | integer | No | FK → `services.id` |
+| `unit_name` | string | No | Max 255 characters |
+| `capacity` | integer | No | Minimum `1` |
+| `unit_status` | string | No | `available` or `occupied` |
+
+`updated_by` is set automatically from the authenticated user.
+
+**Response (200):** Updated unit object.
+
+---
+
+### DELETE /api/units/{'{id}'}
+
+Soft deletes a unit — sets `deleted_at` and `deleted_by`.
+
+**Response (200):**
+
+```json
+{ "message": "Unit deleted" }
+```
+
+:::caution
+Unlike `ServicesController::destroy`, there is **no guard** for contracts. Soft-deleting a unit that is still referenced by a contract's `unit_id` leaves the contract pointing at a soft-deleted unit (`nullOnDelete` only fires on hard deletes). `ContractController` will reject that unit for **new** assignments, but existing contracts are not updated. See [Known Gaps](#known-gaps-for-the-next-set-of-interns).
+:::
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `units` | Read/Write | Primary table for unit records |
+| `services` | Indirect (FK) | `units.service_id` → `services.id` (`ON DELETE SET NULL`, nullable) |
+| `contracts` | Indirect (FK) | `contracts.unit_id` → `units.id` (`ON DELETE SET NULL`, nullable) |
+
+### Relationship Diagram
+
+```
+services (1) ──< (N) units        [SET NULL on delete, nullable service_id]
+contracts (N) ──> (1) units       [SET NULL on delete, nullable unit_id]
+```
+
+### Model: `Unit`
+
+- **Traits:** `HasFactory`, `SoftDeletes`
+- **Timestamps:** Enabled
+- **Fillable:** `service_id`, `unit_name`, `capacity`, `unit_status`, `created_by`, `updated_by`, `deleted_by`
+- **Casts:** `deleted_at` → `datetime`, `unit_status` → `UnitStatus::class`
+- **Relationships:**
+  - `service()` → `belongsTo(Service::class, 'service_id')`
+
+### Unit Status (Enum)
+
+| Status | Value | Description |
+|--------|-------|-------------|
+| Available | `available` | Unit is free to be assigned to a contract |
+| Occupied | `occupied` | Unit is currently in use |
+
+## Seeded Data
+
+The production unit list (loaded via the gitignored `php artisan seed:units` command) contains **54 units** across two services — all seeded as `available`.
+
+### Private Office (38 units)
+
+| Group | Units | Capacity | Count |
+|-------|-------|:---:|:---:|
+| `G1-1` … `G1-19` (skips `G1-7`, `G1-11`) | `G1-1`, `G1-2`, `G1-3`, `G1-4`, `G1-5`, `G1-6`, `G1-8`, `G1-9`, `G1-10`, `G1-12`, `G1-13`, `G1-14`, `G1-15`, `G1-16`, `G1-17`, `G1-18`, `G1-19` | 1 | 17 |
+| `G2-1` … `G2-5` | | 2 | 5 |
+| `G4-1` … `G4-3` | | 4 | 3 |
+| `G6-1` … `G6-3` | | 6 | 3 |
+| `G8-1` … `G8-3` | | 8 | 3 |
+| `G10-1` … `G10-4` | | 10 | 4 |
+| `G20-1`, `G20-2` | | 20 | 2 |
+| `Free space` | | 20 | 1 |
+| **Total** | | | **38** |
+
+### Dedicated Desk (16 units)
+
+| Group | Units | Capacity | Count |
+|-------|-------|:---:|:---:|
+| A-series | `A1` … `A16` | 1 | 16 |
+
+:::note
+`ContractController` rejects soft-deleted units, units that don't belong to the contract's service, and units that are not `available` when assigning them to a contract. See [Contracts](./contracts).
+:::
+
+## Known Gaps (for the next set of interns)
+
+The following are **not yet added/implemented** — confirmed against the current codebase:
+
+- **`unit_status` has only two states** — `available` and `occupied`. There is no `maintenance`, `reserved`, or `pending` status.
+- **Nothing auto-marks a unit `occupied` on assignment** — `ContractController` only *validates* that a unit is `available` when a contract is created/updated; it never writes the unit's status. An assigned unit stays `available` and can be assigned again. The only places that write `unit_status` are the seeders.
+- **No unique constraint on `contracts.unit_id`** — two active contracts can reference the same unit simultaneously.
+- **`UnitsController::destroy` has no contract guard** — contrast with `ServicesController::destroy`, which rejects deletion with `409` when contracts still reference the service. Soft-deleting a referenced unit leaves existing contracts pointing at a trashed unit.
+- **No `restore` endpoint** — soft-deleted units cannot be restored via the API.
+- **No `unique(service_id, unit_name)` constraint** — duplicate unit names within the same service are currently possible.
+- **`UnitSeeder` placeholder data** — creates random `Unit A`/`Unit B`/… names (5–10 per service) with random capacity and random status — including `occupied` units that no contract references. The real 54-unit data only exists via the gitignored `seed:units` command.
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | Sanctum | All routes require a valid API token (`auth:sanctum`) |
+| **Authorization Policies** | None | No `UnitPolicy` exists — any authenticated user can modify units |
+| **Role-Based Access** | None | No role checks beyond being authenticated |
+
+:::caution
+Any authenticated user (regardless of role) can create, update, and delete units. Role-level restrictions are not yet enforced.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | Yes | Yes | Set from `auth()->id()` on create |
+| `updated_by` | Yes | Yes | Set from `auth()->id()` on update |
+| `deleted_by` | Yes | Yes | Set from `auth()->id()` before soft delete |

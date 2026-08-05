@@ -1,0 +1,206 @@
+---
+sidebar_position: 9
+---
+
+# Services
+
+## Overview
+
+The Services resource manages the service offerings of Enspace (e.g. **Private Office**, **Dedicated Desk**, **Virtual Office**). A service sits at the top of the inventory hierarchy:
+
+- **One service → many contracts** — contracts reference a service via `contracts.service_id` (no unique constraint, one service can serve many contracts).
+- **One service → many units** — physical units belong to a service via `units.service_id`.
+
+Services support **soft delete** with an application-level guard: a service that still has contracts attached **cannot be deleted** (`409`).
+
+This resource is **admin-level** — **authentication is required** (all routes are inside the `auth:sanctum` middleware group).
+
+See [Architecture](/enspace-crm/architecture) for project conventions.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/services` | Yes | List services (paginated, filterable) |
+| `POST` | `/api/services` | Yes | Create a new service |
+| `GET` | `/api/services/{id}` | Yes | Retrieve a single service |
+| `PUT/PATCH` | `/api/services/{id}` | Yes | Update a service |
+| `DELETE` | `/api/services/{id}` | Yes | Soft delete a service |
+
+---
+
+### GET /api/services
+
+Returns all services, **paginated 15 per page**, with `contracts` and `units` eager-loaded.
+
+**Optional query parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `service_name` | string | Partial (LIKE) match on the service name |
+| `search` | string | Searches both `service_name` and `description` |
+
+**Examples:**
+
+```
+GET /api/services?service_name=Private
+GET /api/services?search=office
+```
+
+**Response (200):**
+
+```json
+{
+  "current_page": 1,
+  "data": [
+    {
+      "id": 1,
+      "service_name": "Private Office",
+      "description": null,
+      "created_at": "2026-07-27T00:00:00.000000Z",
+      "updated_at": "2026-07-27T00:00:00.000000Z",
+      "contracts": [],
+      "units": []
+    }
+  ],
+  "total": 1,
+  "per_page": 15,
+  "last_page": 1
+}
+```
+
+---
+
+### POST /api/services
+
+Creates a new service. Services exist independently — a contract attaches to one afterward via `contracts.service_id`.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `service_name` | string | Yes | Max 255 characters |
+| `description` | string | No | Free-text description |
+
+`created_by` is set automatically from the authenticated user.
+
+**Response (201):** Returns the created service.
+
+---
+
+### GET /api/services/{'{id}'}
+
+Returns a single service with its `contracts` and `units` loaded.
+
+**Response (200):** Service object.
+**Error:** `404` if not found (including soft-deleted services — route-model binding excludes trashed rows).
+
+---
+
+### PUT/PATCH /api/services/{'{id}'}
+
+Updates a service. All fields are optional.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `service_name` | string | No | Max 255 characters |
+| `description` | string | No | Free-text description |
+
+`updated_by` is set automatically from the authenticated user.
+
+**Response (200):** Updated service object.
+
+---
+
+### DELETE /api/services/{'{id}'}
+
+Soft deletes a service.
+
+**Behavior:**
+- If the service still has contracts attached, the request is **rejected with `409`** (`restrictOnDelete` on the DB FK would block a hard delete, so this mirrors it at the app level for soft deletes).
+- Before soft-deleting, all related `units.service_id` values are set to `null` — `nullOnDelete()` only fires on hard deletes, so this is done manually.
+- Sets `deleted_at` and `deleted_by`.
+
+**Response (200):**
+
+```json
+{ "message": "Service deleted" }
+```
+
+:::note
+Soft-deleting a service does **not** touch `contracts.service_id`. If a contract still points at a soft-deleted service, `ContractController` will reject future assignments to that service (see [Contracts](./contracts)).
+:::
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `services` | Read/Write | Primary table for service records |
+| `units` | Indirect (FK) | `units.service_id` → `services.id` (`ON DELETE SET NULL`) |
+| `contracts` | Indirect (FK) | `contracts.service_id` → `services.id` (`ON DELETE RESTRICT`) |
+
+### Relationship Diagram
+
+```
+services (1) ──< (N) units        [SET NULL on delete, nullable service_id]
+services (1) ──< (N) contracts    [RESTRICT on delete, NOT NULL service_id]
+```
+
+### Model: `Service`
+
+- **Traits:** `HasFactory`, `SoftDeletes`
+- **Timestamps:** Enabled
+- **Fillable:** `service_name`, `description`, `created_by`, `updated_by`, `deleted_by`
+- **Casts:** `deleted_at` → `datetime`
+- **Relationships:**
+  - `contracts()` → `hasMany(Contract::class, 'service_id')`
+  - `units()` → `hasMany(Unit::class, 'service_id')`
+
+## Seeded Data
+
+The production service list (loaded via the gitignored `php artisan seed:services` command):
+
+| Service Name |
+|--------------|
+| Private Office |
+| Dedicated Desk |
+| Free Desk |
+| Virtual Office PRO |
+| Virtual Office Hybrid |
+| Virtual Office Address |
+
+:::note
+The real `description` values are currently `NULL` — `seed:services` creates the names only. The committed `ServiceSeeder` still uses placeholder names (`Service A`–`Service F`) for local dev.
+:::
+
+## Known Gaps (for the next set of interns)
+
+The following are **not yet added/implemented** — confirmed against the current codebase:
+
+- **Placeholder seed data** — `ServiceSeeder` still seeds `Service A`–`Service F`; the real 6 services only exist via the gitignored `seed:services` command, and their `description` values are not populated.
+- **`DatabaseSeeder` ordering** — `ContractSeeder` runs before `ServiceSeeder`, so seeded contracts bind to a self-created "Default Seeded Service" instead of the real services. A reorder (`ServiceSeeder` → `UnitSeeder` → `ContractSeeder`) is pending.
+- **No `is_active` / status flag** — a service cannot be temporarily deactivated without soft-deleting, and soft-delete is blocked (`409`) while contracts exist.
+- **No service-level pricing** — rental rates only exist per contract (`contracts.monthly_rental_rate`); there is no default price per service.
+- **No `restore` endpoint** — only the standard `apiResource` methods are exposed, so soft-deleted services cannot be restored via the API.
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | Sanctum | All routes require a valid API token (`auth:sanctum`) |
+| **Authorization Policies** | None | No `ServicePolicy` exists — any authenticated user can modify services |
+| **Role-Based Access** | None | No role checks beyond being authenticated |
+
+:::caution
+Any authenticated user (regardless of role) can create, update, and delete services. Role-level restrictions are not yet enforced.
+:::
+
+## Audit Tracking
+
+| Field | Column Exists | Auto-Populated | Notes |
+|-------|:---:|:---:|-------|
+| `created_by` | Yes | Yes | Set from `auth()->id()` on create |
+| `updated_by` | Yes | Yes | Set from `auth()->id()` on update |
+| `deleted_by` | Yes | Yes | Set from `auth()->id()` before soft delete |

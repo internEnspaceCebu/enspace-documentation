@@ -11,7 +11,7 @@ The Meeting Room Amenities resource manages individual amenity items (e.g., proj
 This resource uses **optional authentication** — guests can access it freely, but if a user is logged in, their identity is resolved and attached to the request.
 
 :::note
-The `GET /api/meeting-room-amenities/{id}` endpoint is **not implemented** — the controller has no `show()` method. Attempting to retrieve a single amenity will return `405 Method Not Allowed`.
+The `GET /api/meeting-room-amenities/{id}` endpoint is **implemented** — it returns the specified amenity with its `meetingRooms` relationship loaded (`200`).
 :::
 
 ## Endpoints
@@ -82,10 +82,10 @@ Updates an existing amenity. All fields are optional.
 
 ### DELETE /api/meeting-room-amenities/{'{id}'}
 
-Permanently deletes an amenity. This is a **hard delete**.
+Soft-deletes an amenity. This is a **soft delete** — the record is marked with `deleted_at` but not removed from the database.
 
 :::danger
-Deleting an amenity will cascade-delete its pivot records in `booking_meeting_room_amenity` due to the `ON DELETE CASCADE` foreign key constraint. Any bookings that had this amenity will lose the association.
+Because this is a soft delete, the `ON DELETE CASCADE` constraint on `booking_meeting_room_amenity.meeting_room_amenity_id` does **not** fire — existing booking associations are retained. They would only be cascade-removed if the amenity were hard (force) deleted.
 :::
 
 **Response (204):** No content.

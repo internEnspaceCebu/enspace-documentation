@@ -41,8 +41,7 @@ Authenticates a user by email and password.
 
 **Error Responses:**
 
-- `422` — Validation failed (missing fields)
-- `401` — Invalid credentials (user not found or password mismatch)
+- `422` — Invalid credentials (user not found or password mismatch) or missing/invalid fields
 
 **Implementation Details:**
 - Looks up the user by `email` using `User::where('email', ...)`
@@ -62,7 +61,8 @@ Registers a new user with the `Guest` role.
 | `full_name` | string | Yes | Split into `first_name` and `last_name` (space-delimited) |
 | `email` | string | Yes | Must be unique in the `users` table |
 | `password` | string | Yes | Will be hashed before storage |
-| `phone_number` | string | No | Contact number |
+| `phone_number` | string | Yes | Contact number |
+| `password_confirmation` | string | Yes | Must match `password` (the `confirmed` validation rule is applied) |
 
 **Response (201):**
 
@@ -70,7 +70,7 @@ Returns the newly created user object and a Sanctum token.
 
 **Implementation Details:**
 - Splits `full_name` on the first space into `first_name` and `last_name`
-- Auto-generates a `username` from the email prefix
+- Auto-generates a `username` from `full_name` (lowercased, spaces stripped) plus a random 3-digit suffix
 - Always assigns `UserRole::Guest`
 - Sets `is_active` to `false` by default
 
@@ -124,5 +124,5 @@ The `/register` endpoint is publicly accessible with no rate limiting. In produc
 | `deleted_by` | No | N/A |
 
 :::note
-The `users` table has `created_by`, `updated_by`, and `deleted_by` columns, but the `AuthController` does not populate them. Only the `UserController` sets these fields (see [Users](./users.mdx)).
+The `users` table has `created_by`, `updated_by`, and `deleted_by` columns, but the register handler (`UserController::register`) does not populate them. Only `UserController::store`/`update`/`destroy` set these fields (see [Users](./users.mdx)).
 :::

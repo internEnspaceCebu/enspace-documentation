@@ -89,7 +89,7 @@ Updates a booking. All fields are optional. Amenities are **synced** (replaced) 
 
 ### DELETE /api/bookings/{'{id}'}
 
-Permanently deletes a booking. This is a **hard delete**.
+Soft-deletes a booking. This is a **soft delete** — the record is marked with `deleted_at` but not removed from the database.
 
 **Response (204):** No content.
 

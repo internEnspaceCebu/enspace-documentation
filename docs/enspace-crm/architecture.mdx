@@ -1,0 +1,138 @@
+---
+sidebar_position: 2
+---
+
+# Architecture
+
+## Overview
+
+The backend is a standard **Laravel MVC REST API**. A request travels: **HTTP route → Controller → validation → Eloquent model → JSON response**.
+
+This page documents the cross-cutting structure and conventions used across every resource (including `services`, `units`, and `contracts`), so the per-table API pages stay focused on their own fields and endpoints.
+
+## Request Lifecycle
+
+```
+HTTP Request
+    │
+    ▼
+routes/api.php            ← route defined here, middleware applied
+    │
+    ▼
+Controller               ← thin: validate → call model → return JSON
+    │
+    ▼
+Validation               ← $request->validate([...]) / Form Requests
+    │
+    ▼
+Eloquent Model           ← reads/writes the DB table
+    │
+    ▼
+JSON Response            ← paginated/eager-loaded data serialized
+```
+
+## Routing & Access Control
+
+All routes live in `routes/api.php` and are split into two groups:
+
+| Group | Middleware | Resources |
+|-------|-----------|-----------|
+| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`) |
+| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry` |
+
+:::danger
+Public resources can be read **and modified** by anyone without authentication. This is documented per-resource but should be restricted in production.
+:::
+
+## Layering & Directory Structure
+
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| Routes | `routes/api.php` | URL → controller mapping, middleware |
+| Controllers | `app/Http/Controllers/` | Thin HTTP layer: validate, call models, return JSON |
+| Models | `app/Models/` | Table access, relationships, casts, accessors |
+| Enums | `app/Enums/` | Single source of truth for status/type values |
+| Migrations | `database/migrations/` | Versioned schema changes |
+| Seeders | `database/seeders/` | Reference/dev data |
+| Factories | `database/factories/` | Test/factory data generators |
+| Console Commands | `app/Console/Commands/` | Artisan tasks (incl. private seed commands) |
+| Tests | `tests/Feature/`, `tests/Unit/` | PHPUnit feature + unit tests |
+
+## Conventions
+
+### Enums are the single source of truth
+
+Backed string enums in `app/Enums/` define every status/type value. Migrations read from them (`UnitStatus::values()`), models cast columns to them, and controllers validate against them.
+
+Each enum exposes:
+
+| Method | Purpose |
+|--------|---------|
+| `label()` | Human-readable label for dropdowns/UI (e.g. `ITP` → `IT Park`) |
+| `values()` | Plain array of the underlying values, e.g. `['available', 'occupied']` |
+
+### Deletion policy
+
+| Resource | Behavior |
+|----------|----------|
+| `services` | **Soft delete** — sets `deleted_at` + `deleted_by`; 409 if contracts still attached |
+| `units` | **Soft delete** — sets `deleted_at` + `deleted_by` (no guard for assigned contracts) |
+| `contracts` | **Deletion fully blocked** — model `boot()` throws `LogicException`; use `status` instead |
+
+:::note
+For soft-deleted parents, `nullOnDelete()` on the FK only fires on **hard** deletes. Controllers compensate manually — e.g. `ServicesController::destroy` nulls `units.service_id` before soft-deleting.
+:::
+
+### Foreign key strategy
+
+| FK | ON DELETE | Meaning |
+|----|-----------|---------|
+| `units.service_id` | `nullOnDelete` | Deleting a service nulls the link instead of deleting units |
+| `contracts.service_id` | `restrictOnDelete` | A service with contracts **cannot** be deleted |
+| `contracts.customer_id` | `restrict` | A customer with contracts cannot be deleted |
+| `contracts.unit_id` | `nullOnDelete` | Deleting a unit nulls the link instead of deleting contracts |
+
+### Audit columns
+
+Where tracked, tables carry `created_by`, `updated_by`, `deleted_by` — nullable FKs to `users`, auto-populated by controllers from `auth()->id()`.
+
+## Seeding Strategy
+
+- `DatabaseSeeder` orchestrates all seeders in a fixed order (see the **Known Gaps** in `services.mdx` for a pending ordering fix).
+- Seeders are **standalone-capable** — e.g. `ContractSeeder` creates its own service/units if none exist, and self-calls `MeetingRoomSeeder` for the rooms its bookings rely on.
+- Idempotent where possible — `UserSeeder`/`ContractSeeder` skip work when their demo data already exists.
+- **Real production data is kept out of git**: the `Seed*Private` commands (`seed:services`, `seed:units`, `seed:contracts`) live in `app/Console/Commands/` and are gitignored via `*Private*`.
+
+```
+php artisan seed:services    # 6 real services
+php artisan seed:units       # 54 real units (38 Private Office + 16 Dedicated Desk)
+php artisan seed:contracts   # real contract data
+```
+
+:::note
+Private commands are auto-discovered by **filename**, not class name. The class must match its filename or the command silently disappears.
+:::
+
+## Relationships Overview
+
+```
+customers (1) ──< users (N)             each user belongs to one customer
+services (1) ──< units (N)              many units per service
+services (1) ──< contracts (N)          many contracts per service
+customers (1) ──< contracts (N)         a contract belongs to a customer
+units (1)    ──< contracts (N)          a contract may reference one unit (nullable)
+meeting_rooms (1) ──< bookings (N)      bookings reference a room
+bookings (N) ──< booking_meeting_room_amenity >── (N) meeting_room_amenities
+contracts (1) ──< bookings (N)          hours/credits are tracked per contract
+```
+
+## Cross-Cutting Behaviors
+
+| Behavior | Detail |
+|----------|--------|
+| Pagination | List endpoints return 15 items per page (`paginate(15)`) |
+| Eager loading | List/show endpoints load key relations (e.g. `contracts`, `units`, `service`) |
+| Validation errors | `422` with Laravel's validation-error JSON shape |
+| Not found | `404` (`findOrFail` / route-model binding) |
+| Conflict | `409` (e.g. deleting a service that still has contracts) |
+| Deletes | `DELETE` on services/units soft-deletes and returns a message, no body |

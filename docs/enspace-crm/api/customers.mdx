@@ -110,7 +110,7 @@ customers (1) <──── (N) inquiry      [SET NULL on delete]
 ### Model: `Customer`
 
 - **Traits:** `HasFactory`, `SoftDeletes`
-- **Relationships:** None defined in the model (despite multiple FK references from other tables)
+- **Relationships:** `users()` (`hasMany`) and `contracts()` (`hasMany`)
 - **Soft deletes:** Enabled. Uses `booted()` lifecycle hooks for automatic tracking.
 - **Lifecycle hooks:**
   - `creating` → Sets `created_by = auth()->id()`

@@ -1,0 +1,92 @@
+---
+sidebar_position: 1
+---
+
+# Tech Stack
+
+## Overview
+
+The Enspace CRM 2.0 system is a **REST API** built with the **Laravel framework**. The backend exposes JSON endpoints for the frontend application to consume, while this documentation site (Docusaurus) is maintained separately.
+
+## Backend
+
+| Technology | Version | Purpose |
+|-----------|---------|---------|
+| PHP | `^8.3` | Runtime language |
+| Laravel Framework | `^13.8` | Web framework, Eloquent ORM, migrations, seeding |
+| Laravel Sanctum | `^4.0` | API token authentication (`auth:sanctum`) |
+| Laravel Tinker | `^3.0` | Interactive REPL for the app |
+
+## Database
+
+| Technology | Version | Notes |
+|-----------|---------|-------|
+| MySQL | `8.0` | Run via `docker-compose.yml` (Docker container) |
+| phpMyAdmin | latest | Web UI for DB inspection, also in `docker-compose.yml` |
+
+Schema is versioned through **Laravel migrations** (`database/migrations/`). Sample/reference data is loaded through **seeders** (`database/seeders/`).
+
+## Development & QA Tooling
+
+| Package | Purpose |
+|---------|---------|
+| PHPUnit | `^12` — feature + unit tests (`tests/Feature/`, `tests/Unit/`) |
+| Faker PHP | `^1.23` — fake data generation in factories/tests |
+| Laravel Pint | `^1.27` — code style fixer |
+| Collision | `^8.6` — pretty CLI error output |
+| Mockery | `^1.6` — test doubles |
+| Laravel Pail | `^1.2.5` — real-time log tailing |
+
+## Repositories
+
+| Repo | Purpose |
+|------|---------|
+| `enspace-crm_2.0-server` | Laravel REST API (backend) |
+| `enspace-documentation` | This Docusaurus MDX documentation site |
+
+:::note
+There is no frontend repository inside this workspace — the frontend application lives elsewhere and consumes the REST API documented here.
+:::
+
+## Local Development Workflow
+
+```bash
+# 1. Start MySQL + phpMyAdmin
+docker compose up -d
+
+# 2. Create env + key (first time only)
+copy .env.example .env   # Windows
+cp .env.example .env     # Linux / macOS
+php artisan key:generate
+
+# 3. Build the schema and load seed data
+php artisan migrate:fresh --seed
+
+# 4. Serve the API
+php artisan serve
+```
+
+Useful commands:
+
+```bash
+php artisan migrate            # run pending migrations
+php artisan migrate:refresh    # roll back all + re-run all up() methods
+php artisan db:seed            # run all seeders
+php artisan db:seed --class=ServiceSeeder
+php artisan storage:link       # expose public storage for images
+php artisan test               # run the test suite
+```
+
+:::note
+Real production data (the 6 real services and 54 real units) is loaded with **gitignored private commands** (`php artisan seed:services`, `php artisan seed:units`, `php artisan seed:contracts`) — see [Architecture](./architecture) for the seeding strategy.
+:::
+
+## Project Conventions
+
+| Convention | Rule |
+|-----------|------|
+| Models & Controllers | PascalCase, singular (`Service`, `UnitsController`) |
+| Migrations | snake_case, plural (`create_units_table`) |
+| Statuses | Backed enums in `app/Enums/` — single source of truth |
+| Audit columns | `created_by`, `updated_by`, `deleted_by` where tracked |
+| Deletes | Soft deletes on `services` / `units`; deletion blocked on `contracts` |
