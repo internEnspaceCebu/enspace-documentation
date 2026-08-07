@@ -221,6 +221,14 @@ The production unit list (loaded via the gitignored `php artisan seed:units` com
 `ContractController` rejects soft-deleted units, units that don't belong to the contract's service, and units that are not `available` when assigning them to a contract. See [Contracts](./contracts).
 :::
 
+:::note
+Read the README in the `private` folder under `ENSPACE_IT_FILES` (intern email) for the correct order of running the real-data seeders (`seed:services`, `seed:units`, `seed:contracts`).
+:::
+
+:::caution
+**Keep the real-data seeder in sync with schema changes.** Whenever a migration changes the `units` table (new columns, renames, enum values, NOT NULL, etc.), update `seed:units` as well — otherwise it will fail or silently seed stale data.
+:::
+
 ## Known Gaps (for the next set of interns)
 
 The following are **not yet added/implemented** — confirmed against the current codebase:

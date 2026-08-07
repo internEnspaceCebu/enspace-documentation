@@ -10,26 +10,6 @@ The backend is a standard **Laravel MVC REST API**. A request travels: **HTTP ro
 
 This page documents the cross-cutting structure and conventions used across every resource (including `services`, `units`, and `contracts`), so the per-table API pages stay focused on their own fields and endpoints.
 
-## Request Lifecycle
-
-```
-HTTP Request
-    │
-    ▼
-routes/api.php            ← route defined here, middleware applied
-    │
-    ▼
-Controller               ← thin: validate → call model → return JSON
-    │
-    ▼
-Validation               ← $request->validate([...]) / Form Requests
-    │
-    ▼
-Eloquent Model           ← reads/writes the DB table
-    │
-    ▼
-JSON Response            ← paginated/eager-loaded data serialized
-```
 
 ## Routing & Access Control
 
@@ -111,6 +91,10 @@ php artisan seed:contracts   # real contract data
 
 :::note
 Private commands are auto-discovered by **filename**, not class name. The class must match its filename or the command silently disappears.
+:::
+
+:::caution
+**Keep the private seeders in sync with schema changes.** Whenever a migration changes any table covered by `seed:services`, `seed:units`, or `seed:contracts` (new columns, renames, enum values, NOT NULL, etc.), update the corresponding private seeder as well — otherwise it will fail or silently seed stale data.
 :::
 
 ## Relationships Overview

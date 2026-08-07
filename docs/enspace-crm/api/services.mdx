@@ -175,6 +175,14 @@ The production service list (loaded via the gitignored `php artisan seed:service
 The real `description` values are currently `NULL` — `seed:services` creates the names only. The committed `ServiceSeeder` still uses placeholder names (`Service A`–`Service F`) for local dev.
 :::
 
+:::note
+Read the README in the `private` folder under `ENSPACE_IT_FILES` (intern email) for the correct order of running the real-data seeders (`seed:services`, `seed:units`, `seed:contracts`).
+:::
+
+:::caution
+**Keep the real-data seeder in sync with schema changes.** Whenever a migration changes the `services` table (new columns, renames, enum values, NOT NULL, etc.), update `seed:services` as well — otherwise it will fail or silently seed stale data.
+:::
+
 ## Known Gaps (for the next set of interns)
 
 The following are **not yet added/implemented** — confirmed against the current codebase:

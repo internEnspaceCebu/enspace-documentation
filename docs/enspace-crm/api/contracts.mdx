@@ -59,6 +59,7 @@ Returns all contracts, with the customer and their users loaded.
     "security_deposit": 30000,
     "date_start": "2026-01-01T00:00:00.000000Z",
     "date_end": "2026-12-31T00:00:00.000000Z",
+    "notarization_date": null,
     "payment_mode": "monthly_bank_transfer",
     "lease_term": "January 1, 2026 to December 31, 2026",
     "created_at": "2026-07-14T00:00:00.000000Z",
@@ -95,6 +96,7 @@ Creates a new contract.
 | `security_deposit` | integer | Yes | Minimum `0` |
 | `date_start` | date | Yes | Lease start date |
 | `date_end` | date | Yes | Must be on or after `date_start` |
+| `notarization_date` | date | No | Date the contract was notarized (nullable) |
 | `payment_mode` | string | Yes | See enum below |
 
 **Business Rules (service/unit assignment):**
@@ -184,9 +186,9 @@ contracts (1) <── referenced by ── (N) bookings (via customer_id)
 
 - **Traits:** `HasFactory` (no `SoftDeletes`)
 - **Timestamps:** Enabled (`$timestamps = true`)
-- **Fillable:** `customer_id`, `service_id`, `unit_id`, `free_meeting_room_hours_per_month`, `lockers_rented`, `parking_spaces_rented`, `other_benefits`, `status`, `branch_location`, `monthly_rental_rate`, `security_deposit`, `date_start`, `date_end`, `payment_mode`
+- **Fillable:** `customer_id`, `service_id`, `unit_id`, `free_meeting_room_hours_per_month`, `lockers_rented`, `parking_spaces_rented`, `other_benefits`, `status`, `branch_location`, `monthly_rental_rate`, `security_deposit`, `date_start`, `date_end`, `notarization_date`, `payment_mode`
 - **Appended (derived):** `lease_term` — read-only, computed from `date_start`/`date_end`
-- **Casts:** `status` → `ContractStatus::class`, `branch_location` → `BranchLocation::class`, `payment_mode` → `PaymentMode::class`, `date_start`/`date_end` → `date`
+- **Casts:** `status` → `ContractStatus::class`, `branch_location` → `BranchLocation::class`, `payment_mode` → `PaymentMode::class`, `date_start`/`date_end`/`notarization_date` → `date`
 - **Relationships:**
   - `customer()` → `belongsTo(Customer::class)`
   - `service()` → `belongsTo(Service::class, 'service_id')`
@@ -221,6 +223,22 @@ contracts (1) <── referenced by ── (N) bookings (via customer_id)
 | PDC | `pdc` | PDC (Post Dated Check) |
 | Cash | `cash` | Cash |
 | Other | `other` | Other |
+
+## Seeded Data
+
+The production contract list (loaded via the gitignored `php artisan seed:contracts` command) seeds **6 contracts** — each linked to a real service (`Private Office`, `Dedicated Desk`, `Free Desk`, `Virtual Office PRO`) and, where the service type has a physical unit, a real unit (`G1-1`, `G2-1`, `A1`).
+
+:::caution
+Customer data in `seed:contracts` is currently **mocked** — no real customer records have been provided yet. The customer creation block (plus the placeholder lease values: `monthly_rental_rate`, `security_deposit`, dates, `payment_mode`, `notarization_date`) must be replaced with real data once it's ready, before running this command against production.
+:::
+
+:::note
+Before running any of the real-data seeders (`php artisan seed:services`, `seed:units`, `seed:contracts`), read the **README** in the `private` folder under `ENSPACE_IT_FILES` (accessible with the intern email) — it documents the correct sequence for running the seeders for the `contracts`, `services`, and `units` tables.
+:::
+
+:::caution
+**Keep the real-data seeder in sync with schema changes.** Whenever a migration changes the `contracts` table (new columns, renames, enum values, NOT NULL, etc.), update `seed:contracts` as well — otherwise it will fail or silently seed stale data.
+:::
 
 ## Known Gaps (for the next set of interns)
 
