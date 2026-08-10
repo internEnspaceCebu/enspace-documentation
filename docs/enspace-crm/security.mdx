@@ -1,0 +1,95 @@
+---
+sidebar_position: 3
+---
+
+# Security & Authorization Status
+
+> **Status:** Reflects the current server codebase state.
+> **Legend:** `EA` = Employees + admins (`OSStaff`, `GeneralManager`, `Admin`, `SuperAdmin`).
+
+## Desired Security Matrix
+
+The intended authorization rules per resource, per operation (`C` = Create, `R` = Read, `U` = Update, `D` = Delete):
+
+| Resource | C | R | U | D |
+|---|---|---|---|---|
+| Users (mostly) | no security | per member, EA | per member, EA | per member, EA |
+| Customers | EA | per member | EA | EA |
+| Bookings | no security | per company/user details, EA | per user, EA | per user, EA |
+| Ammenities pivot table | per user, EA | per user, EA | per user, EA | per user, EA |
+| Amenities | EA | no security | EA | EA |
+| Meeting rooms | EA | no security | EA | EA |
+| Meeting room images | EA | no security | EA | EA |
+| Inquiry | no security | per member, EA | per member | per member, EA |
+| Services | EA | no security | EA | EA |
+| Units | EA | no security | EA | EA |
+| Contracts | EA | per member | EA | NO DELETE ALLOWED |
+
+## Implemented Status
+
+### Implemented
+
+| Table | Policy | Enforced in |
+|---|---|---|
+| `users` | `app/Policies/UserPolicy.php` | `UserController` — `$this->authorize()` on all 5 actions |
+| `customers` | `app/Policies/CustomerPolicy.php` | `CustomerController` — `$this->authorize()` on all 5 actions |
+| `bookings` | `app/Policies/BookingPolicy.php` | `BookingController` — `authorize()` on create/update/delete; read enforced via `BookingResource` masking (`viewFull`) |
+
+:::note
+Policies are auto-discovered by naming convention (`XPolicy` matching the model). There is **no** `AuthServiceProvider` in the project.
+:::
+
+### Not Implemented
+
+**Publicly accessible — no login required** (`routes/api.php`, section 5):
+
+| Table | Controller |
+|---|---|
+| `meeting_rooms` | `MeetingRoomController` |
+| `contracts` | `ContractController` |
+| `inquiry` | `InquiryController` |
+
+**Login-optional — guests are fully allowed** (`routes/api.php`, section 3, `OptionalAuthenticate`):
+
+| Table | Controller |
+|---|---|
+| `meeting_room_amenities` + `meeting_room_ammenities_pivot` | `MeetingRoomAmenityController` (and `MeetingRoomController` attach/sync) |
+
+:::note
+`bookings` is also routed under section 3 (`OptionalAuthenticate`), but authorization is now enforced via `BookingPolicy` — guests can still **create** (matches "C — no security"), but read responses are masked unless owner/EA, and update/delete require ownership or EA.
+:::
+
+**Authenticated but no authorization — any logged-in user can do anything** (`routes/api.php`, section 4, `auth:sanctum` only):
+
+| Table | Controller |
+|---|---|
+| `services` | `ServicesController` |
+| `units` | `UnitsController` |
+
+**Not routed at all:**
+
+| Table | Note |
+|---|---|
+| `meeting_room_images` | `MeetingRoomImageController` is not wired to any route; images are served via the public `MeetingRoomController@images` endpoint |
+
+## Gap Summary
+
+| Table | Controller | Route group | Policy |
+|---|---|---|---|
+| users | `UserController` | 4 — `auth:sanctum` | ✅ |
+| customers | `CustomerController` | 4 — `auth:sanctum` | ✅ |
+| bookings | `BookingController` | 3 — `OptionalAuthenticate` | ✅ (C open by design; R masked via `BookingResource`, U/D owner-or-EA) |
+| ammenities pivot | `MeetingRoomAmenityController` / `MeetingRoomController` | 3 — `OptionalAuthenticate` | ❌ |
+| amenities | `MeetingRoomAmenityController` | 3 — `OptionalAuthenticate` | ❌ |
+| meeting_rooms | `MeetingRoomController` | 5 — public | ❌ |
+| meeting_room_images | `MeetingRoomImageController` (unrouted) | 5 — public | ❌ |
+| inquiry | `InquiryController` | 5 — public | ❌ |
+| services | `ServicesController` | 4 — `auth:sanctum` | ❌ |
+| units | `UnitsController` | 4 — `auth:sanctum` | ❌ |
+| contracts | `ContractController` | 5 — public | ❌ |
+
+## Notes for Future Work
+
+- **To implement:** create one policy per resource in `app/Policies/`, add `$this->authorize()` calls to the corresponding controller, and (for public routes) move endpoints into an authenticated/protected route group in `routes/api.php`.
+- **Notable rules from the matrix:** `contracts` must have **no delete** allowed; `inquiry` `U` is "per member" only (no EA). `bookings` is **fully implemented** — C is open by design, R is masked per company/user + EA, U/D are owner-or-EA.
+- The `meeting_room_ammenities_pivot` table has a typo in its name — flagging so future migrations reference the same spelling.

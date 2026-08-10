@@ -10,18 +10,18 @@ The Bookings resource manages meeting room reservations in the Enspace CRM. A bo
 
 Bookings have a **many-to-many relationship** with Meeting Room Amenities through the `booking_meeting_room_amenity` pivot table. When creating or updating a booking, you can specify which amenities are needed.
 
-This resource uses **optional authentication** — guests can view and create bookings, but if a user is logged in, their identity is resolved.
+This resource uses **optional authentication** — guests can create bookings and view them, but authorization is enforced via `BookingPolicy`: read responses are masked unless you own the booking, belong to the same customer, or are EA (Employee/Admin); update and delete require ownership or EA.
 
 ## Endpoints
 
 | Method | URI | Auth Required | Description |
 |--------|-----|:---:|-------------|
-| `GET` | `/api/bookings` | Optional | List all bookings (paginated, 20/page) |
-| `POST` | `/api/bookings` | Optional | Create a new booking |
-| `GET` | `/api/bookings/{id}` | Optional | Retrieve a single booking |
-| `PUT/PATCH` | `/api/bookings/{id}` | Optional | Update a booking |
-| `DELETE` | `/api/bookings/{id}` | Optional | Delete a booking |
-| `POST` | `/api/bookings/by-date-range` | Optional | Find bookings within a date range |
+| `GET` | `/api/bookings` | Optional | List all bookings (paginated, 20/page) — sensitive fields masked unless owner/EA |
+| `POST` | `/api/bookings` | Optional | Create a new booking (open to guests) |
+| `GET` | `/api/bookings/{id}` | Optional | Retrieve a single booking — sensitive fields masked unless owner/EA |
+| `PUT/PATCH` | `/api/bookings/{id}` | Optional | Update a booking (owner or EA only) |
+| `DELETE` | `/api/bookings/{id}` | Optional | Delete a booking (owner or EA only) |
+| `POST` | `/api/bookings/by-date-range` | Optional | Find bookings within a date range — sensitive fields masked unless owner/EA |
 
 ---
 
@@ -35,7 +35,7 @@ Returns a paginated list of all bookings (20 per page).
 |-----------|------|---------|-------------|
 | `page` | integer | 1 | Page number |
 
-**Response (200):** Paginated booking objects with standard Laravel pagination metadata.
+**Response (200):** Paginated booking objects with standard Laravel pagination metadata. For non-owners (and non-EA), sensitive fields (`user_id`, `customer_id`, `booking_name`, `booking_email`, `booking_phone`, `total_amount`, statuses, audit columns, `custom_booking_price`, `booking_price`) are omitted; only `id`, `meeting_room_id`, `booking_date`, `start_time`, `end_time` are returned.
 
 ---
 
@@ -47,8 +47,9 @@ Creates a new booking with optional amenity associations.
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `user_id` | integer | No | FK → `users.id` |
-| `customer_id` | integer | No | FK → `customers.id` |
+| `user_id` | integer | No | FK → `users.id`. Defaults to the authenticated user via the model. Only **OS Staff** may override it (403 otherwise) |
+| `customer_id` | integer | No | FK → `customers.id`. Auto-populated from the user's company when `use_company_contract` is enabled; only **OS Staff** may set it explicitly (403 otherwise) |
+| `use_company_contract` | boolean | No | When `true`, fills `customer_id` from the user's linked company (if not provided) |
 | `meeting_room_id` | integer | Yes | FK → `meeting_rooms.id` |
 | `booking_name` | string | Yes | Display name for the booking |
 | `booking_email` | string | Yes | Contact email |
@@ -60,11 +61,12 @@ Creates a new booking with optional amenity associations.
 | `booking_status` | enum | No | `No-show`, `Pending`, `Ongoing`, `Completed` (default: `Pending`) |
 | `payment_status` | enum | No | `No Payment`, `Down Payment`, `Full Payment` (default: `No Payment`) |
 | `special_requests` | string | No | Any special requirements |
+| `custom_booking_price` | integer | No | Custom negotiated price (nullable). When set, the computed `booking_price` accessor uses it instead of the room's `hourly_rate` |
 | `meeting_room_amenities` | array | No | Array of amenity IDs to attach |
-| `created_by` | integer | No | **Client-provided** (see audit note) |
-| `updated_by` | integer | No | **Client-provided** (see audit note) |
 
 **Response (201):** Returns the created booking.
+
+> **Note:** `created_by`, `updated_by`, `deleted_by` are **not** accepted in the request body — they are auto-populated from `auth()->id()` by the model.
 
 ---
 
@@ -72,7 +74,7 @@ Creates a new booking with optional amenity associations.
 
 Returns a single booking by ID.
 
-**Response (200):** Booking object.
+**Response (200):** Booking object. Sensitive fields are masked unless the requester owns the booking, belongs to the same customer, or is EA.
 **Error:** `404` if not found.
 
 ---
@@ -80,6 +82,8 @@ Returns a single booking by ID.
 ### PUT/PATCH /api/bookings/{'{id}'}
 
 Updates a booking. All fields are optional. Amenities are **synced** (replaced) via `sync()`.
+
+**Authorization:** The requester must own the booking (`user_id` matches) or be EA (`OSStaff`, `General Manager`, `Admin`, `Super Admin`). Otherwise `403`.
 
 **Request Body:** Same as `POST`, all fields optional.
 
@@ -90,6 +94,8 @@ Updates a booking. All fields are optional. Amenities are **synced** (replaced) 
 ### DELETE /api/bookings/{'{id}'}
 
 Soft-deletes a booking. This is a **soft delete** — the record is marked with `deleted_at` but not removed from the database.
+
+**Authorization:** The requester must own the booking (`user_id` matches) or be EA. Otherwise `403`.
 
 **Response (204):** No content.
 
@@ -113,7 +119,7 @@ Finds all bookings within a specified date range, ordered by `booking_date` asce
 | Table | Access | Description |
 |-------|--------|-------------|
 | `bookings` | Read/Write | Primary table for booking records |
-| `users` | Indirect (FK) | `bookings.user_id` → `users.id` (`ON DELETE SET NULL`) |
+| `users` | Indirect (FK) | `bookings.user_id` → `users.id` (NOT NULL, `ON DELETE CASCADE`) |
 | `customers` | Indirect (FK) | `bookings.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
 | `meeting_rooms` | Indirect (FK) | `bookings.meeting_room_id` → `meeting_rooms.id` (`ON DELETE CASCADE`) |
 | `meeting_room_amenities` | Read/Write (pivot) | Many-to-many via `booking_meeting_room_amenity` |
@@ -121,7 +127,7 @@ Finds all bookings within a specified date range, ordered by `booking_date` asce
 ### Relationship Diagram
 
 ```
-bookings (N) ──FK──> (1) users           [SET NULL on delete]
+bookings (N) ──FK──> (1) users           [NOT NULL, CASCADE on delete]
 bookings (N) ──FK──> (1) customers       [SET NULL on delete]
 bookings (N) ──FK──> (1) meeting_rooms   [CASCADE on delete]
 bookings (N) <──pivot──> (N) meeting_room_amenities
@@ -131,9 +137,12 @@ bookings (N) <──pivot──> (N) meeting_room_amenities
 
 - **Traits:** `HasFactory`, `SoftDeletes`
 - **Relationships:**
+  - `user()` → `belongsTo(User::class)`
   - `customer()` → `belongsTo(Customer::class)`
+  - `meetingRoom()` → `belongsTo(MeetingRoom::class)`
   - `meetingRoomAmenities()` → `belongsToMany(MeetingRoomAmenity::class)` with pivot `created_at`
-- **Notable:** No `belongsTo(User)` or `belongsTo(MeetingRoom)` relationships defined in the model, despite the FK columns existing in the database.
+- **Audit hooks:** `booted()` auto-sets `created_by`/`updated_by`/`deleted_by` from `auth()->id()`, defaults `user_id` to the authenticated user, and fills `customer_id` from the user's company.
+- **Accessor:** `booking_price` → returns `custom_booking_price` if set, else the meeting room's `hourly_rate`.
 - **Soft deletes:** Enabled
 
 ### Enums Used
@@ -148,21 +157,43 @@ bookings (N) <──pivot──> (N) meeting_room_amenities
 | Aspect | Status | Details |
 |--------|:---:|---------|
 | **Authentication Middleware** | Optional (`OptionalAuthenticate`) | If a bearer token is present, the user is resolved; otherwise proceeds unauthenticated |
-| **Authorization Policies** | None | No `BookingPolicy` exists |
-| **Role-Based Access** | None | Any visitor can create, update, or delete bookings |
+| **Authorization Policy** | `BookingPolicy` | `create` → open; `update`/`delete` → booking owner (`user_id`) or EA; `viewFull` → owner, same `customer_id`, or EA |
+| **Role-Based Access** | EA = `OSStaff`, `General Manager`, `Admin`, `Super Admin` | EA bypasses ownership checks via the policy `before()` hook |
+| **Read masking** | `BookingResource` | Non-owners/guests only receive `id`, `meeting_room_id`, `booking_date`, `start_time`, `end_time`; all other fields hidden |
+| **Field override** | OS Staff only | Only `OSStaff` may set/override `user_id` and `customer_id` (otherwise `403`) |
 
-:::danger
-Bookings can be created, modified, and deleted by anyone without authentication. There is no check to prevent double-booking a meeting room for overlapping time slots.
+:::note
+Creating a booking is intentionally open (guests can book a room). Update and delete require ownership or EA, enforced via `$this->authorize()` in the controller. Read is enforced at the resource layer, not by blocking the request.
 :::
+
+## Pending / Upcoming — Double-Booking Conflict Prevention
+
+:::caution
+The following is **not yet merged into `dev`**. It lives on the feature branch `feature/conflict-booking-check-for-bookings-table` (also bundled in `feature/payments`) and is documented here as an **upcoming** change — it does **not** describe current behavior and should not be relied upon in the API as it stands.
+:::
+
+Once merged, creating or updating a booking will prevent **overlapping time slots** for the same meeting room:
+
+- **Schema:** new migration `2026_07_29_072253_add_index_in_bookings_table.php` adds a composite index `bookings_room_date_index` on `(meeting_room_id, booking_date)` to speed up conflict lookups.
+- **Time validation:** `end_time` must be after `start_time` on both `store()` and `update()` — otherwise a `422` is returned.
+- **Conflict detection:** a new `preventBookingConflict()` runs inside a `DB::transaction`, locks matching rows with `lockForUpdate()`, then checks for overlaps via `Booking::bookingConflictCheck()`.
+- **Conflict response:** on overlap, a `422` is returned with:
+  ```json
+  {
+    "message": "The given data was invalid.",
+    "errors": { "booking_date": ["This time slot is already booked."] }
+  }
+  ```
+- **Midnight-span support:** `Booking::toDateTimeRange()` treats an `end_time` that is not after `start_time` as ending on the **following day** (booking spans midnight).
+- **Factory:** `BookingFactory` now generates valid windows (start between `08:00` and `18:00`, duration `1–4` hours).
 
 ## Audit Tracking
 
 | Field | Column Exists | Auto-Populated | Notes |
 |-------|:---:|:---:|-------|
-| `created_by` | Yes (`bigInteger`) | No | **Client-provided** — sent in the request body |
-| `updated_by` | Yes (`bigInteger`) | No | **Client-provided** — sent in the request body |
-| `deleted_by` | Yes (`bigInteger`) | No | **Client-provided** — sent in the request body |
+| `created_by` | Yes (`bigInteger`) | Yes | Set from `auth()->id()` in the model `creating` hook |
+| `updated_by` | Yes (`bigInteger`) | Yes | Set from `auth()->id()` in the model `updating` hook |
+| `deleted_by` | Yes (`bigInteger`) | Yes | Set from `auth()->id()` in the model `deleting` hook |
 
-:::danger
-The `created_by`, `updated_by`, and `deleted_by` fields are included in the validation rules for both `store()` and `update()` methods. This means the **client sends these values** in the request body — they are NOT derived from `Auth::id()`. This is a **security vulnerability** as any user can spoof the identity of who created or modified a booking. There is no FK constraint on these columns either.
-:::
+:::note
+Audit fields are **no longer client-provided** — they are derived from the authenticated user by the `Booking` model's `booted()` hooks. There is no FK constraint on these columns.
