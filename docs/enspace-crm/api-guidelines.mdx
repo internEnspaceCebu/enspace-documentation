@@ -1,0 +1,90 @@
+---
+sidebar_position: 5
+---
+
+# API Guidelines
+
+Standard response shapes, error codes, and conventions used across every resource. These are the cross-cutting rules shared by all endpoints documented in the [API Reference](/category/api-reference).
+
+## Base URL & Authentication
+
+- All endpoints are served under `/api` (e.g. `http://localhost:9100/api`).
+- **Authentication** uses Laravel Sanctum bearer tokens (`auth:sanctum`).
+- Send the token as an `Authorization: Bearer <token>` header on protected routes.
+- Some routes accept **optional authentication** (guests may call them; a token resolves the user when present) — flagged per-resource.
+
+## Success Responses
+
+| Status | When | Body |
+|:---:|------|------|
+| `200` | Read / update succeeded | Resource object or collection |
+| `201` | Create succeeded | The created resource |
+| `204` | Delete succeeded | No content |
+
+- List endpoints return **JSON arrays** or **paginated objects** (see Pagination).
+- Single-resource endpoints return the resource object directly.
+
+## Error Responses
+
+| Status | Meaning | Common causes |
+|:---:|---------|--------------|
+| `401` | Unauthenticated | Missing / invalid bearer token |
+| `403` | Forbidden | Authenticated but not allowed (policy denied) |
+| `404` | Not found | `findOrFail` / route-model binding found nothing |
+| `409` | Conflict | Business-rule conflict (e.g. deleting a service that still has contracts) |
+| `422` | Validation failed | Invalid or missing fields |
+
+### 422 validation-error shape
+
+All validation failures use Laravel's standard shape:
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "booking_date": ["This time slot is already booked."],
+    "email": ["The email field is required."]
+  }
+}
+```
+
+Each key in `errors` is a field name; the value is an array of messages.
+
+## Pagination
+
+| Resource | Page size | Paginated? |
+|----------|:---:|:---:|
+| `services`, `units` | 15 | Yes |
+| `bookings` | 20 | Yes |
+| `customers`, `users` | 20 | Yes |
+| `contracts`, `meeting-rooms`, `inquiry` | — | No (full list) |
+
+Paginated responses use the standard Laravel pagination metadata (`data`, `current_page`, `last_page`, `per_page`, `total`, etc.). Use the `?page=` query parameter to navigate.
+
+## Conventions
+
+### Enums are the single source of truth
+
+Statuses and types are backed string enums in `app/Enums/` — migrations, models, and validation all read from them. Validate against them with `new Enum(SomeEnum::class)`.
+
+### Validation errors are 422
+
+Controllers validate via `$request->validate([...])`; failed validation returns `422` with the shape above.
+
+### Audit columns
+
+Where tracked, tables carry `created_by`, `updated_by`, `deleted_by`. These are **auto-populated from `auth()->id()`** where implemented (e.g. `bookings`) and are not meant to be client-provided.
+
+### Deletes
+
+- `services` / `units`: **soft delete** (sets `deleted_at`; services additionally 409 if contracts remain attached).
+- `contracts`: **deletion fully blocked** — use `status` instead.
+- `bookings`: **soft delete**, owner or EA only.
+
+### Eager loading
+
+List/show endpoints eager-load key relationships (e.g. `contracts` load `customer.users`, meeting rooms load `meetingRoomImages` + `amenities`) so responses are self-contained.
+
+## Read Masking
+
+Some resources return **masked fields** based on authorization (e.g. `bookings` via `BookingResource`). Non-privileged requesters receive a reduced field set instead of a `403`. This is documented per-resource in the [API Reference](/category/api-reference).

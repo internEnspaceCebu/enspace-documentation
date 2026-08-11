@@ -1,0 +1,181 @@
+---
+sidebar_position: 1
+---
+
+# Onboarding
+
+Everything you need to set up the Enspace CRM 2.0 backend on your machine, from installing the tools to running the API for the first time. If something is unclear, this page is meant to answer it before you need to ask the tech lead.
+
+## What You're Setting Up
+
+| Piece | What it is | Runs via |
+|-------|-----------|----------|
+| **Backend** | Laravel 13 REST API (`enspace-crm_2.0-server`) | `php artisan serve` |
+| **Database** | MySQL 8.0 | Docker container (`docker compose up -d`) |
+| **DB UI** | phpMyAdmin (web interface for the database) | Docker container |
+| **Docs** | This Docusaurus site (`enspace-documentation`) | `npm run start` |
+
+## Required Tools
+
+| Tool | Minimum / Recommended | Why |
+|------|----------------------|-----|
+| Docker Desktop | any recent version (e.g. 29.5.3) | Runs MySQL + phpMyAdmin |
+| GitHub Desktop | latest | Clone and manage the repos |
+| Postman | latest | Test the REST API endpoints |
+| PHP | **8.4** standalone (project requires `^8.3`) | Runs Laravel |
+| Composer | 2.x | PHP dependency manager |
+| MySQL | 8.0 | Already provided by Docker in this repo |
+
+:::note
+You do **not** need a separate MySQL installation — this repo's `docker-compose.yml` provides MySQL 8.0. Standalone MySQL is only listed for people who prefer not to use Docker.
+:::
+
+## Installing the Tools
+
+### 1. Docker Desktop
+
+1. Go to [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/) and download Docker Desktop for Windows.
+2. Run the installer. On the **WSL 2 backend** prompt, keep it enabled (this is the recommended setup).
+3. Restart your machine if prompted, then open **Docker Desktop** and let it start (the whale icon stops animating when ready).
+4. Verify in a terminal:
+
+```bash
+docker --version
+docker compose version
+```
+
+:::note
+Any recent Docker Desktop version works — e.g. **29.5.3**. The exact version doesn't matter as long as both commands above print a version.
+:::
+
+### 2. GitHub Desktop
+
+1. Download from [https://desktop.github.com/](https://desktop.github.com/) and install.
+2. Open GitHub Desktop and sign in with your GitHub account.
+3. Clone the repo later from File → **Clone repository** (or use `git clone` in a terminal).
+
+### 3. Postman
+
+1. Download from [https://www.postman.com/downloads/](https://www.postman.com/downloads/) and install.
+2. Create a (free) account or continue as guest.
+3. You'll use it to call `http://localhost:9100/api/...` endpoints once the server is running.
+
+### 4. PHP 8.4 (standalone, recommended for Laravel)
+
+Choose one option per platform:
+
+- **Windows (recommended): Laragon** — [https://laragon.org/download/](https://laragon.org/download/). Laragon bundles a standalone PHP, Composer, and MySQL with zero configuration. It is the tool Laravel's own docs recommend for Windows.
+- **Windows (alternative): Chocolatey**
+
+```bash
+choco install php composer
+```
+
+- **Windows (manual):** download the PHP 8.4 zip (x64, non-thread-safe is fine for CLI) from [https://windows.php.net/download/](https://windows.php.net/download/), extract to `C:\php`, and add `C:\php` to your `PATH` (System Properties → Environment Variables).
+- **macOS (Homebrew):**
+
+```bash
+brew install php@8.4
+```
+
+- **Linux (Ubuntu/Debian):** the Ondřej PPA ships current PHP builds:
+
+```bash
+sudo add-apt-repository ppa:ondrej/php
+sudo apt update
+sudo apt install php8.4-cli php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip php8.4-mysql
+```
+
+Verify PHP works and is 8.4:
+
+```bash
+php -v   # should show PHP 8.4.x
+```
+
+### 5. Composer
+
+- **Laragon:** Composer is included — verify with `composer --version`.
+- **Standalone:** download and run the installer from [https://getcomposer.org/download/](https://getcomposer.org/download/). It needs `php` to be on your `PATH` (step 4). Verify:
+
+```bash
+composer --version
+```
+
+### 6. MySQL
+
+Not required separately — this repo's Docker setup provides **MySQL 8.0** (see the project setup below). If you'd rather run a local server instead of Docker, install MySQL Community Server + Workbench from [https://dev.mysql.com/downloads/](https://dev.mysql.com/downloads/).
+
+## One-Time Project Setup
+
+```bash
+# 1. Clone the repository (GitHub Desktop or CLI)
+git clone https://github.com/internEnspaceCebu/enspace-crm_2.0-server.git
+cd enspace-crm_2.0-server
+
+# 2. Install PHP dependencies
+composer install
+
+# 3. Create the active env file from the DEV environment
+#    (Windows)           (Linux / macOS)
+copy .env.dev .env       cp .env.dev .env
+php artisan key:generate
+
+# 4. Start MySQL + phpMyAdmin (Docker)
+docker compose up -d
+
+# 5. Link public storage (required for meeting room images)
+php artisan storage:link
+
+# 6. Build the schema and load seed data
+php artisan migrate:fresh --seed
+
+# 7. Serve the API
+php artisan serve
+```
+
+The API is now running at `http://localhost:9100/api`.
+
+## Environments (which port to use)
+
+The repo ships three env files. For local development and testing you **always use the dev environment** — copy its contents into `.env` so everything runs on the dev ports only.
+
+| Environment | File | Backend port | MySQL port | phpMyAdmin | Used for |
+|-------------|------|:---:|:---:|:---:|----------|
+| **Dev** | `.env.dev` (→ copy to `.env`) | `9100` | `9101` | `9102` | Backend testing |
+| **Staging** | `.env.staging` | `7100` | `7101` | `7102` | Frontend |
+| **Prod** | `.env.prod` | `8100` | `8101` | `8102` | Deployment |
+
+:::caution
+The ports collide if you run more than one environment at once — each uses the same container names, so **switch by copying the right env file into `.env`, not by starting multiple at the same time**. Keep `.env` on the **dev** values while you work.
+:::
+
+### Environment reference (dev values)
+
+| Key | Value | Notes |
+|-----|-------|-------|
+| `APP_ENV` | `dev` | |
+| `APP_PORT` | `9100` | Backend API |
+| `DB_HOST` | `127.0.0.1` | |
+| `DB_PORT` | `9101` | MySQL on the host |
+| `DB_DATABASE` | `mysql_enspace_crm` | |
+| `PMA_PORT` | `9102` | phpMyAdmin in the browser |
+
+Credentials live in your `.env` file — never commit or share them.
+
+## Day-to-Day Startup
+
+```bash
+docker compose up -d   # start MySQL + phpMyAdmin if not running
+php artisan serve      # start the API on :9100
+```
+
+phpMyAdmin: [http://localhost:9102](http://localhost:9102)
+
+## Troubleshooting & Gotchas
+
+- **Meeting room images return `404`** → you skipped `php artisan storage:link`. Run it; it creates the `public/storage` symlink that image URLs rely on.
+- **`php artisan migrate:fresh` wipes ALL data** — it drops every table and re-creates the schema. If you had real data loaded, re-run the private seeders afterwards (see the [Data Seeding runbook](./runbooks/data-seeding)).
+- **`php artisan test` wipes data too** — the test suite currently runs against the **same** database (`mysql_enspace_crm`), so running tests drops and rebuilds its tables. This is a known limitation until a separate test database is configured.
+- **`composer` not found** → PHP isn't on your `PATH` (re-check step 4) or Composer isn't installed (step 5).
+- **Docker commands fail** → Docker Desktop isn't running yet; open it and wait until it's ready.
+- **Wrong port** → confirm `.env` was copied from `.env.dev` (expect `:9100`, not `:7100` or `:8100`).

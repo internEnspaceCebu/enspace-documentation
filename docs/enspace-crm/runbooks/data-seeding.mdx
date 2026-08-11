@@ -1,0 +1,68 @@
+---
+sidebar_position: 1
+---
+
+# Data Seeding
+
+How sample, reference, and **real production data** is loaded into the database.
+
+## Seeders (Sample / Demo Data)
+
+Seeders live in `database/seeders/`. The `DatabaseSeeder` runs them in this order:
+
+1. `MeetingRoomAmenitySeeder`
+2. `MeetingRoomSeeder`
+3. `MeetingRoomImagesSeeder`
+4. `BookingAmenitySeeder`
+5. `UserSeeder`
+6. `InquirySeeder`
+7. `ContractSeeder`
+8. `ServiceSeeder`
+9. `UnitSeeder`
+
+It then creates a demo **user** (`test@example.com`), a demo **customer** (`company@example.com`), and a demo **booking** (`booking@example.com`) unless they already exist.
+
+### Run them
+
+```bash
+php artisan db:seed                # run everything
+php artisan db:seed --class=ServiceSeeder
+php artisan migrate:fresh --seed   # rebuild schema, then seed
+```
+
+## Real Production Data (Private Commands)
+
+Real services, units, and contracts are loaded with **gitignored private commands**:
+
+| Command | Seeds |
+|---------|-------|
+| `php artisan seed:services` | 6 real services |
+| `php artisan seed:units` | 54 real units (38 Private Office + 16 Dedicated Desk) |
+| `php artisan seed:contracts` | real contract data |
+
+:::warning Order matters
+`seed:units` must run **after** `seed:services` (units belong to services). `seed:contracts` runs after those.
+:::
+
+### Where do these commands come from?
+
+The private command files are **not in git** — they are excluded via `app/Console/Commands/.gitignore` (`*Private*`), so a fresh clone will **not** have `seed:services`, `seed:units`, or `seed:contracts`. The tech lead shares them separately (e.g. via a drive). Until you receive them, those three commands will not exist.
+
+### Keep them in sync with the schema
+
+Whenever a migration changes any table covered by the private seeders (new columns, renames, enum values, NOT NULL, etc.), the corresponding private seeder must be updated too — otherwise it fails or silently seeds stale data.
+
+## After a Fresh Migrate
+
+`php artisan migrate:fresh` drops **all** tables and re-creates the schema. To restore data:
+
+```bash
+php artisan migrate:fresh --seed        # demo/sample data
+php artisan seed:services               # then real services...
+php artisan seed:units                  # ...real units...
+php artisan seed:contracts              # ...and real contracts
+```
+
+:::caution
+`php artisan test` also rebuilds the schema on the **same** database — running the test suite wipes whatever data was loaded. Re-run the seeders above afterwards.
+:::

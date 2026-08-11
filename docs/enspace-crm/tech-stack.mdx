@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 ---
 
 # Tech Stack
@@ -50,42 +50,7 @@ There is no frontend repository inside this workspace — the frontend applicati
 
 ## Local Development Workflow
 
-```bash
-# 1. Create env + key (first time only)
-copy .env.example .env   # Windows
-cp .env.example .env     # Linux / macOS
-php artisan key:generate
-
-# 2. Start MySQL + phpMyAdmin
-docker compose up -d
-
-# 3. Build the schema and load seed data
-php artisan migrate:fresh --seed
-
-# 4. Link public storage (required — meeting room images resolve via /storage/...)
-php artisan storage:link
-
-# 5. Serve the API
-php artisan serve
-```
-
-:::note
-`storage:link` creates the `public/storage` → `storage/app/public` symlink. Meeting room image URLs are built as `asset('storage/<path>')` (`MeetingRoomImage::url`), so this must be run or the images return `404` locally.
-:::
-
-Useful commands:
-
-```bash
-php artisan migrate            # run pending migrations
-php artisan migrate:refresh    # roll back all + re-run all up() methods
-php artisan db:seed            # run all seeders
-php artisan db:seed --class=ServiceSeeder
-php artisan test               # run the test suite
-```
-
-:::note
-Real production data (the 6 real services and 54 real units) is loaded with **gitignored private commands** (`php artisan seed:services`, `php artisan seed:units`, `php artisan seed:contracts`) — see [Architecture](./architecture) for the seeding strategy.
-:::
+Setting up the environment (installing tools, `.env`, Docker, migrations, `storage:link`) is covered in the **[Onboarding](./onboarding)** guide. This page only lists the technology stack.
 
 ## Project Conventions
 
