@@ -1,0 +1,201 @@
+---
+sidebar_position: 11
+---
+
+# Payments
+
+## Overview
+
+The Payments resource handles **online payment for bookings** via **PayMongo**. A payment is created against a booking, the customer pays through the PayMongo-hosted flow, and PayMongo notifies the server through a webhook so the payment status can be finalized.
+
+The flow is built around PayMongo **Payment Intents**:
+
+1. The client asks the server to create a payment intent for a booking → `POST /api/payment-intents` returns a `payment_intent_id` and `client_key`.
+2. The client creates a **payment method** on the PayMongo side (using the PayMongo SDK/publishable key — e.g. GCash, QR Ph) and sends the `payment_method_id` back with the `client_key` → `POST /api/payment-intents/{id}/attach` returns a `redirect_url`.
+3. The customer completes the payment at the `redirect_url`.
+4. PayMongo sends a webhook event to `POST /api/webhook`, the signature is verified, and a queued job (`ProcessPayMongoWebhook`) updates the payment's `payment_status`.
+
+Each booking can have one payment intent. Attempting to create a second intent for an **already-paid** booking is rejected.
+
+These routes are **fully public** (no authentication middleware). Security relies on PayMongo's secret key for API calls and webhook signature verification.
+
+See [Architecture](/enspace-crm/architecture) for project conventions.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `POST` | `/api/payment-intents` | No | Create a PayMongo payment intent for a booking |
+| `POST` | `/api/payment-intents/{'{payment_intent_id}'}/attach` | No | Attach a payment method to an existing intent |
+| `POST` | `/api/webhook` | No (signature-verified) | PayMongo webhook — confirms payment status |
+
+---
+
+### POST /api/payment-intents
+
+Creates a PayMongo Payment Intent for a booking and stores a row in the `payments` table.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `id` | integer | Yes | FK → `bookings.id`. Must exist (`exists:bookings,id`) |
+
+**Behavior:**
+- If the booking already has a payment with status `paid`, the request is rejected with `400`.
+- The intent amount is `custom_booking_price` if set, otherwise `total_amount` (converted to **centavos** — amount × 100).
+- `payment_method_allowed` is fixed to `gcash` and `qrph`; `currency` is `PHP`; the `description` is the booking name.
+- The request is sent to PayMongo using the server's `PAYMONGO_SECRET_KEY` (`config('services.paymongo.secret_key')`).
+- A `payments` row is persisted with the intent id, the booking id, the amount (in pesos), the payment method type, and the initial status returned by PayMongo.
+
+**Response (201):**
+
+```json
+{
+  "payment_intent_id": "pi_abc123",
+  "client_key": "int_abc123_ck_xyz"
+}
+```
+
+**Errors:**
+
+| Status | Body | When |
+|:---:|------|------|
+| `400` | `{ "message": "Booking is already paid." }` | The booking already has a `paid` payment |
+| `422` | Standard validation shape | `id` missing / not a valid booking id |
+| `5xx` | `{ "message": "Unexpected error", "error": "..." }` | Network failure talking to PayMongo |
+| `4xx/5xx` | `{ "message": "Failed to create payment intent", "error": {...} }` | PayMongo API error (status proxied from PayMongo) |
+
+---
+
+### POST /api/payment-intents/{'{payment_intent_id}'}/attach
+
+Attaches a previously created **payment method** to the payment intent and returns the redirect URL where the customer completes payment.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `payment_method_id` | string | Yes | Payment method id returned by the PayMongo SDK (`pm_...`) |
+| `client_key` | string | Yes | The client key returned when the intent was created |
+
+**Behavior:**
+- The attach call is made to PayMongo with the same `PAYMONGO_SECRET_KEY`.
+- The `return_url` is currently **hardcoded** in the controller to `http://192.168.48.50:3100`.
+- On success, the matching `payments.payment_status` is updated to the status returned by PayMongo.
+
+**Response (200):**
+
+```json
+{
+  "redirect_url": "https://paymongo.com/payment-intents/.../payments/.../redirect"
+}
+```
+
+**Errors:**
+
+| Status | Body | When |
+|:---:|------|------|
+| `422` | Standard validation shape | `payment_method_id` / `client_key` missing |
+| `5xx` | `{ "message": "Unexpected error", "error": "..." }` | Network failure talking to PayMongo |
+| `4xx/5xx` | `{ "message": "Failed to attach payment intent", "error": "..." }` | PayMongo API error (status proxied from PayMongo) |
+
+---
+
+### POST /api/webhook
+
+PayMongo webhook endpoint that confirms the final payment status.
+
+**Request Headers:**
+
+| Header | Required | Description |
+|--------|:---:|-------------|
+| `Paymongo-Signature` | Yes | PayMongo webhook signature header (`t=<timestamp>,te=<signature>`), verified against `PAYMONGO_WEBHOOK_SECRET_KEY` |
+
+**Behavior:**
+- The raw request body and `Paymongo-Signature` header are used to verify authenticity: the expected signature is `HMAC-SHA256(secret, "{timestamp}.{rawBody}")` compared with timing-safe `hash_equals`.
+- If the signature is missing or invalid, a `401` is returned.
+- On success the payload is dispatched to the queued `ProcessPayMongoWebhook` job, which extracts `payment_intent_id` + `status` from the event payload and updates the matching `payments.payment_status`.
+
+**Response (200):**
+
+```json
+{
+  "received": true
+}
+```
+
+**Errors:**
+
+| Status | Body | When |
+|:---:|------|------|
+| `401` | `{ "error": "Invalid signature" }` | Missing or invalid `Paymongo-Signature` header |
+
+:::note
+`ProcessPayMongoWebhook` only updates rows where the `payment_intent_id` matches. Because the signature check passes before the job is dispatched, the job itself does not re-verify the signature.
+:::
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `payments` | Read/Write | Primary table for payment records |
+| `bookings` | Indirect (FK) | `payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
+
+### Relationship Diagram
+
+```
+payments (N) ──FK──> (1) bookings  [RESTRICT on delete]
+```
+
+### Model: `Payment`
+
+- **Traits:** `SoftDeletes`
+- **Fillable:** `payment_intent_id`, `booking_id`, `amount`, `payment_method_type`, `payment_status`, `deleted_at`
+- **Relationships:** none currently defined in the model
+- **Soft deletes:** Enabled — a payment is removed from `payments` only by soft-deleting it
+
+### `payments` Table Schema
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | bigint (PK) | Auto-increment |
+| `payment_intent_id` | string | **Unique** — PayMongo payment intent id (`pi_...`) |
+| `booking_id` | bigint (FK) | → `bookings.id`, `ON DELETE RESTRICT` |
+| `amount` | decimal(10,2) | Amount in pesos |
+| `payment_method_type` | string | e.g. `gcash` |
+| `payment_status` | string | PayMongo intent status (e.g. `awaiting_payment_method`, `succeeded`) |
+| `created_at` / `updated_at` | timestamp | Timestamps |
+| `deleted_at` | timestamp | Soft delete |
+
+## Configuration
+
+PayMongo credentials are read from `config/services.php` and sourced from environment variables:
+
+| Env Variable | Config Key | Purpose |
+|--------------|------------|---------|
+| `PAYMONGO_SECRET_KEY` | `services.paymongo.secret_key` | Authenticates all outbound calls to `api.paymongo.com` |
+| `PAYMONGO_WEBHOOK_SECRET_KEY` | `services.paymongo.webhook_secret` | Verifies the `Paymongo-Signature` on `/api/webhook` |
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | None | All three payment routes are public |
+| **Webhook verification** | Yes | HMAC-SHA256 over `{timestamp}.{rawBody}` using the webhook secret; `401` on mismatch |
+| **Outbound API auth** | PayMongo secret key | Basic auth with `PAYMONGO_SECRET_KEY` on every PayMongo call |
+| **Already-paid guard** | `400` | `store()` rejects creating an intent for a booking that is already paid |
+| **Secrets in code** | ⚠️ | The publishable test key appears in `tests/Feature/PaymongoTest.php`; the `return_url` is hardcoded in the controller |
+
+:::danger
+- The payment endpoints are **public** — any client can create payment intents for a booking id. Consider restricting them once the frontend flow is stable.
+- The `return_url` is hardcoded to `http://192.168.48.50:3100` in `PaymentController::attach()` and should be moved to configuration before production.
+- Webhook status updates rely on `payment_intent_id` only; a `Payment` may be updated even after the booking's own `payment_status` enum (`No Payment` / `Down Payment` / `Full Payment`) says otherwise.
+:::
+
+## Tests
+
+`tests/Feature/PaymongoTest.php` covers:
+- Creating a payment intent for a booking (`201`, `payments` row persisted)
+- Creating a payment method via PayMongo (`pk_test_...` publishable key)
+- Attaching a payment method id to the intent and receiving a `redirect_url`

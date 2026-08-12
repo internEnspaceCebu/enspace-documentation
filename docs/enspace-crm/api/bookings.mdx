@@ -55,8 +55,8 @@ Creates a new booking with optional amenity associations.
 | `booking_email` | string | Yes | Contact email |
 | `booking_phone` | string | Yes | Contact phone |
 | `booking_date` | date | Yes | Date of the booking (`Y-m-d`) |
-| `start_time` | time | Yes | Start time (`H:i`) |
-| `end_time` | time | Yes | End time (`H:i`) |
+| `start_time` | time | Yes | Start time (`H:i:s`) |
+| `end_time` | time | Yes | End time (`H:i:s`, must be after `start_time`) |
 | `total_amount` | numeric | Yes | Total cost (decimal) |
 | `booking_status` | enum | No | `No-show`, `Pending`, `Ongoing`, `Completed` (default: `Pending`) |
 | `payment_status` | enum | No | `No Payment`, `Down Payment`, `Full Payment` (default: `No Payment`) |
@@ -123,6 +123,7 @@ Finds all bookings within a specified date range, ordered by `booking_date` asce
 | `customers` | Indirect (FK) | `bookings.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
 | `meeting_rooms` | Indirect (FK) | `bookings.meeting_room_id` → `meeting_rooms.id` (`ON DELETE CASCADE`) |
 | `meeting_room_amenities` | Read/Write (pivot) | Many-to-many via `booking_meeting_room_amenity` |
+| `payments` | Write (via [Payments](./payments)) | `payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
 
 ### Relationship Diagram
 
@@ -131,7 +132,12 @@ bookings (N) ──FK──> (1) users           [NOT NULL, CASCADE on delete]
 bookings (N) ──FK──> (1) customers       [SET NULL on delete]
 bookings (N) ──FK──> (1) meeting_rooms   [CASCADE on delete]
 bookings (N) <──pivot──> (N) meeting_room_amenities
+bookings (1) <── referenced by ── (N) payments   [RESTRICT on delete]
 ```
+
+:::note
+Online payment intents for a booking are handled by the **Payments** resource ([Payments](./payments)) — `POST /api/payment-intents`, `POST /api/payment-intents/{id}/attach`, and `POST /api/webhook`.
+:::
 
 ### Model: `Booking`
 
@@ -166,17 +172,13 @@ bookings (N) <──pivot──> (N) meeting_room_amenities
 Creating a booking is intentionally open (guests can book a room). Update and delete require ownership or EA, enforced via `$this->authorize()` in the controller. Read is enforced at the resource layer, not by blocking the request.
 :::
 
-## Pending / Upcoming — Double-Booking Conflict Prevention
+## Double-Booking Conflict Prevention
 
-:::caution
-The following is **not yet merged into `dev`**. It lives on the feature branch `feature/conflict-booking-check-for-bookings-table` (also bundled in `feature/payments`) and is documented here as an **upcoming** change — it does **not** describe current behavior and should not be relied upon in the API as it stands.
-:::
+Creating or updating a booking prevents **overlapping time slots** for the same meeting room:
 
-Once merged, creating or updating a booking will prevent **overlapping time slots** for the same meeting room:
-
-- **Schema:** new migration `2026_07_29_072253_add_index_in_bookings_table.php` adds a composite index `bookings_room_date_index` on `(meeting_room_id, booking_date)` to speed up conflict lookups.
-- **Time validation:** `end_time` must be after `start_time` on both `store()` and `update()` — otherwise a `422` is returned.
-- **Conflict detection:** a new `preventBookingConflict()` runs inside a `DB::transaction`, locks matching rows with `lockForUpdate()`, then checks for overlaps via `Booking::bookingConflictCheck()`.
+- **Schema:** migration `2026_07_29_072253_add_index_in_bookings_table.php` adds a composite index `bookings_room_date_index` on `(meeting_room_id, booking_date)` to speed up conflict lookups.
+- **Time validation:** on `store()`, `end_time` must be after `start_time` (`after:start_time`) — otherwise `422`. On `update()`, the same rule is enforced with a custom message: `"The end time must be after the start time."`
+- **Conflict detection:** `preventBookingConflict()` runs inside a `DB::transaction`, locks matching rows with `lockForUpdate()`, then checks for overlaps via `Booking::bookingConflictCheck()`.
 - **Conflict response:** on overlap, a `422` is returned with:
   ```json
   {
@@ -186,6 +188,11 @@ Once merged, creating or updating a booking will prevent **overlapping time slot
   ```
 - **Midnight-span support:** `Booking::toDateTimeRange()` treats an `end_time` that is not after `start_time` as ending on the **following day** (booking spans midnight).
 - **Factory:** `BookingFactory` now generates valid windows (start between `08:00` and `18:00`, duration `1–4` hours).
+- **Tests:** `BookingConflictCheckTest` covers the conflict detection behavior.
+
+:::note
+Conflict checks run on `store()` always, and on `update()` only when `meeting_room_id`, `booking_date`, `start_time`, or `end_time` are present in the request.
+:::
 
 ## Audit Tracking
 

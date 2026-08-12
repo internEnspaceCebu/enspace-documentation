@@ -28,7 +28,8 @@ Standard response shapes, error codes, and conventions used across every resourc
 
 | Status | Meaning | Common causes |
 |:---:|---------|--------------|
-| `401` | Unauthenticated | Missing / invalid bearer token |
+| `400` | Bad request | Business rule rejected (e.g. booking already paid on `POST /api/payment-intents`) |
+| `401` | Unauthenticated | Missing / invalid bearer token, or invalid webhook signature |
 | `403` | Forbidden | Authenticated but not allowed (policy denied) |
 | `404` | Not found | `findOrFail` / route-model binding found nothing |
 | `409` | Conflict | Business-rule conflict (e.g. deleting a service that still has contracts) |

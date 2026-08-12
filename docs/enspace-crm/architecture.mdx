@@ -18,7 +18,8 @@ All routes live in `routes/api.php` and are split into two groups:
 | Group | Middleware | Resources |
 |-------|-----------|-----------|
 | **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`) |
-| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry` |
+| **Optional auth** | `OptionalAuthenticate` | `bookings`, `meeting-room-amenities` (incl. `POST /bookings/by-date-range`) |
+| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry`, `payments` (`POST /api/payment-intents`, `/attach`, `/api/webhook`) |
 
 :::danger
 Public resources can be read **and modified** by anyone without authentication. This is documented per-resource but should be restricted in production.
@@ -108,6 +109,7 @@ units (1)    ──< contracts (N)          a contract may reference one unit (n
 meeting_rooms (1) ──< bookings (N)      bookings reference a room
 bookings (N) ──< booking_meeting_room_amenity >── (N) meeting_room_amenities
 contracts (1) ──< bookings (N)          hours/credits are tracked per contract
+bookings (1) ──< payments (N)           online payment intents belong to a booking
 ```
 
 ## Cross-Cutting Behaviors
