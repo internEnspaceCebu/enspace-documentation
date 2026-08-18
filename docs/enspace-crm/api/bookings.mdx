@@ -93,7 +93,7 @@ Updates a booking. All fields are optional. Amenities are **synced** (replaced) 
 
 ### DELETE /api/bookings/{'{id}'}
 
-Soft-deletes a booking. This is a **soft delete** — the record is marked with `deleted_at` but not removed from the database.
+Cancels and soft-deletes a booking. Before deleting, the booking's `booking_status` is set to `Cancelled`. This is a **soft delete** — the record is marked with `deleted_at` but not removed from the database.
 
 **Authorization:** The requester must own the booking (`user_id` matches) or be EA. Otherwise `403`.
 
@@ -123,7 +123,7 @@ Finds all bookings within a specified date range, ordered by `booking_date` asce
 | `customers` | Indirect (FK) | `bookings.customer_id` → `customers.id` (`ON DELETE SET NULL`) |
 | `meeting_rooms` | Indirect (FK) | `bookings.meeting_room_id` → `meeting_rooms.id` (`ON DELETE CASCADE`) |
 | `meeting_room_amenities` | Read/Write (pivot) | Many-to-many via `booking_meeting_room_amenity` |
-| `payments` | Write (via [Payments](./payments)) | `payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
+| `booking_payments` | Write (via [Booking Payments](./payments)) | `booking_payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
 
 ### Relationship Diagram
 
@@ -132,11 +132,11 @@ bookings (N) ──FK──> (1) users           [NOT NULL, CASCADE on delete]
 bookings (N) ──FK──> (1) customers       [SET NULL on delete]
 bookings (N) ──FK──> (1) meeting_rooms   [CASCADE on delete]
 bookings (N) <──pivot──> (N) meeting_room_amenities
-bookings (1) <── referenced by ── (N) payments   [RESTRICT on delete]
+bookings (1) <── referenced by ── (N) booking_payments   [RESTRICT on delete]
 ```
 
 :::note
-Online payment intents for a booking are handled by the **Payments** resource ([Payments](./payments)) — `POST /api/payment-intents`, `POST /api/payment-intents/{id}/attach`, and `POST /api/webhook`.
+Online payment intents for a booking are handled by the **Booking Payments** resource ([Booking Payments](./payments)) — `POST /api/payment-intents`, `POST /api/payment-intents/{id}/attach`, and `POST /api/webhook`.
 :::
 
 ### Model: `Booking`
@@ -155,7 +155,7 @@ Online payment intents for a booking are handled by the **Payments** resource ([
 
 | Enum | Column | Values |
 |------|--------|--------|
-| `BookingStatus` | `booking_status` | `No-show`, `Pending`, `Ongoing`, `Completed` |
+| `BookingStatus` | `booking_status` | `No-show`, `Pending`, `Ongoing`, `Completed`, `Cancelled` |
 | `PaymentStatus` | `payment_status` | `No Payment`, `Down Payment`, `Full Payment` |
 
 ## Security
