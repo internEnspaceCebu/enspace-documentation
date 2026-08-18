@@ -1,0 +1,14 @@
+[Unit]
+Description=crm2-test-service
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=insert_working_directory_01
+ExecStart=/bin/bash insert_working_directory_02
+StandardOutput=append:insert_working_directory_02.log
+StandardError=append:insert_working_directory_02.log
+
+[Install]
+WantedBy=default.target
