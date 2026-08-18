@@ -30,4 +30,4 @@ tmux_send_keys(){
 # ===============================================
 
 tmux_send_keys "cd $DIR"
-tmux_send_keys "npm start -- --port 8999"
+tmux_send_keys "npm start -- --host 0.0.0.0 --port 8999"
