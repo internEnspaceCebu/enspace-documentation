@@ -24,7 +24,7 @@ See [Architecture](/enspace-crm/architecture) for project conventions.
 
 | Method | URI | Auth Required | Description |
 |--------|-----|:---:|-------------|
-| `GET` | `/api/contracts` | No | List all contracts |
+| `GET` | `/api/contracts` | No | List contracts (paginated, `per_page`/`page`, cap 500) |
 | `POST` | `/api/contracts` | No | Create a new contract |
 | `GET` | `/api/contracts/{id}` | No | Retrieve a single contract |
 | `PUT/PATCH` | `/api/contracts/{id}` | No | Update a contract |
@@ -38,7 +38,16 @@ See [Architecture](/enspace-crm/architecture) for project conventions.
 
 ### GET /api/contracts
 
-Returns all contracts, with the customer and their users loaded.
+Returns a page of contracts, with the customer and their users loaded.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `per_page` | integer | `500` | Items per page, clamped to `[1, 500]` (`ContractController::MAX_PER_PAGE`) |
+| `page` | integer | `1` | Page number, clamped to a minimum of `1` |
+
+Example: `GET /api/contracts?per_page=50&page=2`
 
 **Response (200):**
 
@@ -70,7 +79,7 @@ Returns all contracts, with the customer and their users loaded.
 ```
 
 :::note
-Results are **not paginated** — the full collection is returned.
+Pagination here is **offset/limit-based**, not Laravel's `paginate()` — the response is a plain JSON array (as shown above), with no `data`/`current_page`/`total` metadata envelope. To know whether more pages exist, check whether the returned array is shorter than the requested `per_page`.
 :::
 
 ---

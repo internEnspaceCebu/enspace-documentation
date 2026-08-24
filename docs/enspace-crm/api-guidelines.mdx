@@ -53,14 +53,16 @@ Each key in `errors` is a field name; the value is an array of messages.
 
 ## Pagination
 
-| Resource | Page size | Paginated? |
-|----------|:---:|:---:|
-| `services`, `units` | 15 | Yes |
-| `bookings` | 20 | Yes |
-| `customers`, `users` | 20 | Yes |
-| `contracts`, `meeting-rooms`, `inquiry` | — | No (full list) |
+| Resource | Page size | Paginated? | Client-controlled `per_page`? |
+|----------|:---:|:---:|:---:|
+| `services`, `units` | 15 | Yes | No |
+| `bookings` | 20 | Yes | No |
+| `users` | 20 | Yes | No |
+| `customers` | 20 (default) | Yes | Yes, cap 500 |
+| `contracts` | 500 (default) | Yes | Yes, cap 500 |
+| `meeting-rooms`, `inquiry` | — | No (full list) | — |
 
-Paginated responses use the standard Laravel pagination metadata (`data`, `current_page`, `last_page`, `per_page`, `total`, etc.). Use the `?page=` query parameter to navigate.
+Paginated responses use the standard Laravel pagination metadata (`data`, `current_page`, `last_page`, `per_page`, `total`, etc.) — **except `contracts`**, which uses manual offset/limit and returns a plain JSON array with no metadata envelope. Use the `?page=` query parameter to navigate; `customers` and `contracts` additionally accept `?per_page=` (clamped to `[1, 500]`).
 
 ## Conventions
 
