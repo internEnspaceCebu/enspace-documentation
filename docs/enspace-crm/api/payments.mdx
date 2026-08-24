@@ -2,11 +2,11 @@
 sidebar_position: 11
 ---
 
-# Payments
+# Booking Payments
 
 ## Overview
 
-The Payments resource handles **online payment for bookings** via **PayMongo**. A payment is created against a booking, the customer pays through the PayMongo-hosted flow, and PayMongo notifies the server through a webhook so the payment status can be finalized.
+The Booking Payments resource handles **online payment for bookings** via **PayMongo**. A payment is created against a booking, the customer pays through the PayMongo-hosted flow, and PayMongo notifies the server through a webhook so the payment status can be finalized.
 
 The flow is built around PayMongo **Payment Intents**:
 
@@ -33,7 +33,7 @@ See [Architecture](/enspace-crm/architecture) for project conventions.
 
 ### POST /api/payment-intents
 
-Creates a PayMongo Payment Intent for a booking and stores a row in the `payments` table.
+Creates a PayMongo Payment Intent for a booking and stores a row in the `booking_payments` table.
 
 **Request Body:**
 
@@ -46,7 +46,7 @@ Creates a PayMongo Payment Intent for a booking and stores a row in the `payment
 - The intent amount is `custom_booking_price` if set, otherwise `total_amount` (converted to **centavos** — amount × 100).
 - `payment_method_allowed` is fixed to `gcash` and `qrph`; `currency` is `PHP`; the `description` is the booking name.
 - The request is sent to PayMongo using the server's `PAYMONGO_SECRET_KEY` (`config('services.paymongo.secret_key')`).
-- A `payments` row is persisted with the intent id, the booking id, the amount (in pesos), the payment method type, and the initial status returned by PayMongo.
+- A `booking_payments` row is persisted with the intent id, the booking id, the amount (in pesos), the payment method type, and the initial status returned by PayMongo.
 
 **Response (201):**
 
@@ -82,7 +82,7 @@ Attaches a previously created **payment method** to the payment intent and retur
 **Behavior:**
 - The attach call is made to PayMongo with the same `PAYMONGO_SECRET_KEY`.
 - The `return_url` is currently **hardcoded** in the controller to `http://192.168.48.50:3100`.
-- On success, the matching `payments.payment_status` is updated to the status returned by PayMongo.
+- On success, the matching `booking_payments.payment_status` is updated to the status returned by PayMongo.
 
 **Response (200):**
 
@@ -115,7 +115,7 @@ PayMongo webhook endpoint that confirms the final payment status.
 **Behavior:**
 - The raw request body and `Paymongo-Signature` header are used to verify authenticity: the expected signature is `HMAC-SHA256(secret, "{timestamp}.{rawBody}")` compared with timing-safe `hash_equals`.
 - If the signature is missing or invalid, a `401` is returned.
-- On success the payload is dispatched to the queued `ProcessPayMongoWebhook` job, which extracts `payment_intent_id` + `status` from the event payload and updates the matching `payments.payment_status`.
+- On success the payload is dispatched to the queued `ProcessPayMongoWebhook` job, which extracts `payment_intent_id` + `status` from the event payload and updates the matching `booking_payments.payment_status`.
 
 **Response (200):**
 
@@ -139,23 +139,23 @@ PayMongo webhook endpoint that confirms the final payment status.
 
 | Table | Access | Description |
 |-------|--------|-------------|
-| `payments` | Read/Write | Primary table for payment records |
-| `bookings` | Indirect (FK) | `payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
+| `booking_payments` | Read/Write | Primary table for payment records |
+| `bookings` | Indirect (FK) | `booking_payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
 
 ### Relationship Diagram
 
 ```
-payments (N) ──FK──> (1) bookings  [RESTRICT on delete]
+booking_payments (N) ──FK──> (1) bookings  [RESTRICT on delete]
 ```
 
-### Model: `Payment`
+### Model: `BookingPayment`
 
 - **Traits:** `SoftDeletes`
 - **Fillable:** `payment_intent_id`, `booking_id`, `amount`, `payment_method_type`, `payment_status`, `deleted_at`
 - **Relationships:** none currently defined in the model
-- **Soft deletes:** Enabled — a payment is removed from `payments` only by soft-deleting it
+- **Soft deletes:** Enabled — a payment is removed from `booking_payments` only by soft-deleting it
 
-### `payments` Table Schema
+### `booking_payments` Table Schema
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -185,17 +185,17 @@ PayMongo credentials are read from `config/services.php` and sourced from enviro
 | **Webhook verification** | Yes | HMAC-SHA256 over `{timestamp}.{rawBody}` using the webhook secret; `401` on mismatch |
 | **Outbound API auth** | PayMongo secret key | Basic auth with `PAYMONGO_SECRET_KEY` on every PayMongo call |
 | **Already-paid guard** | `400` | `store()` rejects creating an intent for a booking that is already paid |
-| **Secrets in code** | ⚠️ | The publishable test key appears in `tests/Feature/PaymongoTest.php`; the `return_url` is hardcoded in the controller |
+| **Secrets in code** | ⚠️ | The publishable test key appears in `tests/Feature/BookingPaymentTest.php`; the `return_url` is hardcoded in the controller |
 
 :::danger
 - The payment endpoints are **public** — any client can create payment intents for a booking id. Consider restricting them once the frontend flow is stable.
-- The `return_url` is hardcoded to `http://192.168.48.50:3100` in `PaymentController::attach()` and should be moved to configuration before production.
-- Webhook status updates rely on `payment_intent_id` only; a `Payment` may be updated even after the booking's own `payment_status` enum (`No Payment` / `Down Payment` / `Full Payment`) says otherwise.
+- The `return_url` is hardcoded to `http://192.168.48.50:3100` in `BookingPaymentController::attach()` and should be moved to configuration before production.
+- Webhook status updates rely on `payment_intent_id` only; a `BookingPayment` may be updated even after the booking's own `payment_status` enum (`No Payment` / `Down Payment` / `Full Payment`) says otherwise.
 :::
 
 ## Tests
 
-`tests/Feature/PaymongoTest.php` covers:
-- Creating a payment intent for a booking (`201`, `payments` row persisted)
+`tests/Feature/BookingPaymentTest.php` covers:
+- Creating a payment intent for a booking (`201`, `booking_payments` row persisted)
 - Creating a payment method via PayMongo (`pk_test_...` publishable key)
 - Attaching a payment method id to the intent and receiving a `redirect_url`

@@ -53,7 +53,7 @@ Policies are auto-discovered by naming convention (`XPolicy` matching the model)
 
 | Table | Controller |
 |---|---|
-| `meeting_room_amenities` + `meeting_room_ammenities_pivot` | `MeetingRoomAmenityController` (and `MeetingRoomController` attach/sync) |
+| `meeting_room_amenities` + `meeting_room_amenities_pivot` | `MeetingRoomAmenityController` (and `MeetingRoomController` attach/sync) |
 
 :::note
 `bookings` is also routed under section 3 (`OptionalAuthenticate`), but authorization is now enforced via `BookingPolicy` — guests can still **create** (matches "C — no security"), but read responses are masked unless owner/EA, and update/delete require ownership or EA.
@@ -79,7 +79,7 @@ Policies are auto-discovered by naming convention (`XPolicy` matching the model)
 | users | `UserController` | 4 — `auth:sanctum` | ✅ |
 | customers | `CustomerController` | 4 — `auth:sanctum` | ✅ |
 | bookings | `BookingController` | 3 — `OptionalAuthenticate` | ✅ (C open by design; R masked via `BookingResource`, U/D owner-or-EA) |
-| ammenities pivot | `MeetingRoomAmenityController` / `MeetingRoomController` | 3 — `OptionalAuthenticate` | ❌ |
+| `meeting_room_amenities_pivot` | `MeetingRoomAmenityController` / `MeetingRoomController` | 3 — `OptionalAuthenticate` | ❌ |
 | amenities | `MeetingRoomAmenityController` | 3 — `OptionalAuthenticate` | ❌ |
 | meeting_rooms | `MeetingRoomController` | 5 — public | ❌ |
 | meeting_room_images | `MeetingRoomImageController` (unrouted) | 5 — public | ❌ |
@@ -92,4 +92,4 @@ Policies are auto-discovered by naming convention (`XPolicy` matching the model)
 
 - **To implement:** create one policy per resource in `app/Policies/`, add `$this->authorize()` calls to the corresponding controller, and (for public routes) move endpoints into an authenticated/protected route group in `routes/api.php`.
 - **Notable rules from the matrix:** `contracts` must have **no delete** allowed; `inquiry` `U` is "per member" only (no EA). `bookings` is **fully implemented** — C is open by design, R is masked per company/user + EA, U/D are owner-or-EA.
-- The `meeting_room_ammenities_pivot` table has a typo in its name — flagging so future migrations reference the same spelling.
+- The `meeting_room_amenities_pivot` table name typo has been fixed (previously `meeting_room_ammenities_pivot`).
