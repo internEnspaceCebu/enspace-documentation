@@ -6,7 +6,7 @@ sidebar_position: 4.5
 
 ## Overview
 
-Booking History keeps a permanent snapshot of a booking whenever that booking is **created**, **updated**, or **deleted**. Each snapshot is stored in the `bookings_history` table and connected to the original booking through `booking_id`.
+Booking History keeps a stored snapshot of a booking whenever that booking is **created**, **updated**, or **deleted**. Each snapshot is stored in the `bookings_history` table and connected to the original booking through `booking_id`.
 
 History entries are created automatically by the `Booking` model. Clients cannot manually create, update, or delete them through the API. The only Booking History endpoint is read-only.
 
