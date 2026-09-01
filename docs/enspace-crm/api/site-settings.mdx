@@ -1,0 +1,115 @@
+---
+sidebar_position: 12
+---
+
+# Site Settings
+
+## Overview
+
+The Site Settings resource holds a single, site-wide default **theme** — the theme guests and freshly-logged-in users see before any personal preference applies. It backs a **singleton row**: the table only ever has one record, created on first read via `SiteSetting::current()` (`firstOrCreate`).
+
+This is distinct from a user's own theme preference (`users.theme`, see [Users](/enspace-crm/api/users) — `POST`/`PUT` accept a `theme` field). Site Settings controls the shared default; the user field overrides it per-account.
+
+Reads are **fully public**; only `Admin`/`SuperAdmin` may update it (`SiteSettingPolicy`) — narrower than the usual `isPrivileged()` set, `OSStaff`/`GeneralManager` are deliberately excluded.
+
+See [Architecture](/enspace-crm/architecture) for project conventions.
+
+## Endpoints
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/site-settings` | No | Read the current site-wide theme |
+| `PATCH` | `/api/site-settings` | Yes (`auth:sanctum`, Admin/SuperAdmin) | Update the site-wide theme |
+
+There is no `index`, `store`, or `destroy` — the singleton row is created implicitly and never deleted.
+
+---
+
+### GET /api/site-settings
+
+Public. Returns the current settings row, creating it with the default theme (`main`) on first call.
+
+**Response (200):**
+
+```json
+{
+  "id": 1,
+  "theme": "main",
+  "updated_by": null,
+  "created_at": "2026-08-27T00:00:00.000000Z",
+  "updated_at": "2026-08-27T00:00:00.000000Z"
+}
+```
+
+---
+
+### PATCH /api/site-settings
+
+Updates the site-wide theme. Requires `update` policy authorization (`SiteSettingPolicy`) — `Admin`/`SuperAdmin` only.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|:---:|-------------|
+| `theme` | string | Yes | One of `BaseTheme::siteThemeValues()` — see below |
+
+**Response (200):** Updated settings row. `updated_by` is set to `auth()->id()`.
+
+**Errors:**
+
+| Status | When |
+|:---:|------|
+| `401` | No authenticated user |
+| `403` | Authenticated but not `Admin`/`SuperAdmin` |
+| `422` | `theme` missing or not a recognized value |
+
+## Theme Values
+
+Defined in `App\Enums\BaseTheme`, mirroring the frontend's `SITE_THEMES` (`src/app/lib/theme.ts`): each base theme plus a `-dark` variant.
+
+| Base value | Label | Dark variant |
+|---|---|---|
+| `main` | Main Theme | `main-dark` |
+| `secondary` | Secondary Theme | `secondary-dark` |
+| `sakura` | Sakura Theme | `sakura-dark` |
+| `matcha` | Matcha Theme | `matcha-dark` |
+
+`BaseTheme::siteThemeValues()` returns all 8 values and is the validation source of truth for both this endpoint and the `users.theme` field. It is **not** validated with `new Enum(BaseTheme::class)` (the usual pattern elsewhere in the codebase) because the `-dark` variants aren't enum cases — validation uses `Rule::in(BaseTheme::siteThemeValues())` instead.
+
+## Related Tables
+
+| Table | Access | Description |
+|-------|--------|-------------|
+| `site_settings` | Read/Write | Singleton table — always exactly one row |
+
+No foreign keys; `updated_by` is a plain `unsignedBigInteger`, not an FK constraint to `users`.
+
+### Model: `SiteSetting`
+
+- **Fillable:** `theme`, `updated_by`
+- **Helper:** `SiteSetting::current()` — `firstOrCreate([], ['theme' => 'main'])`; callers should always go through this rather than querying the table directly
+
+### `site_settings` Table Schema
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | bigint (PK) | Auto-increment |
+| `theme` | string | Default `'main'` |
+| `updated_by` | unsignedBigInteger, nullable | No FK constraint |
+| `created_at` / `updated_at` | timestamp | Timestamps |
+
+## Security
+
+| Aspect | Status | Details |
+|--------|:---:|---------|
+| **Authentication Middleware** | `auth:sanctum` on `PATCH` only | `GET` is fully public |
+| **Authorization Policy** | Yes (`SiteSettingPolicy`) | `update` restricted to `Admin`/`SuperAdmin`; no `before()` blanket-access hook |
+
+## Tests
+
+`tests/Feature/SiteSettingControllerTest.php` covers:
+- Public read returns the default theme (`main`) when unauthenticated
+- `Admin`/`SuperAdmin` can update the theme (`200`, row persisted)
+- `GeneralManager`/`OSStaff` cannot (`403`)
+- Unauthenticated update attempt (`401`)
+- Unknown theme value / missing `theme` on update (`422`)

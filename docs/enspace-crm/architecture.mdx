@@ -17,9 +17,9 @@ All routes live in `routes/api.php` and are split into two groups:
 
 | Group | Middleware | Resources |
 |-------|-----------|-----------|
-| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`) |
+| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`), `PATCH /site-settings` |
 | **Optional auth** | `OptionalAuthenticate` | `bookings`, `meeting-room-amenities` (incl. `POST /bookings/by-date-range`) |
-| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry`, `payments` (`POST /api/payment-intents`, `/attach`, `/api/webhook`) |
+| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry`, `payments` (`POST /api/payment-intents`, `/attach`, `/api/webhook`), `GET /site-settings` |
 
 :::danger
 Public resources can be read **and modified** by anyone without authentication. This is documented per-resource but should be restricted in production.
