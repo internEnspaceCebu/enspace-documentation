@@ -14,12 +14,12 @@ Customers are a **core entity** in the system — they are referenced by Users, 
 
 | Method | URI | Auth Required | Description |
 |--------|-----|:---:|-------------|
-| `GET` | `/api/customers` | Yes (`auth:sanctum`) | List all customers (paginated, 20/page, max 100) |
+| `GET` | `/api/customers` | Yes (`auth:sanctum`) | List all customers (paginated, `per_page`, default 20, cap 500) |
+| `GET` | `/api/customer` | Yes (`auth:sanctum`) | List all customers via a separate custom-paginated route (same behavior as above) |
 | `POST` | `/api/customers` | Yes (`auth:sanctum`) | Create a new customer |
 | `GET` | `/api/customers/{id}` | Yes (`auth:sanctum`) | Retrieve a single customer |
 | `PUT/PATCH` | `/api/customers/{id}` | Yes (`auth:sanctum`) | Update a customer |
 | `DELETE` | `/api/customers/{id}` | Yes (`auth:sanctum`) | Soft-delete a customer |
-| `GET` | `/api/customer` | Yes (`auth:sanctum`) | Custom pagination endpoint (same as index, accepts `per_page`) |
 
 ---
 
@@ -31,10 +31,24 @@ Returns a paginated list of all customers. Requires `viewAny` policy authorizati
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `per_page` | integer | `20` | Items per page, clamped to `[1, 500]` (`CustomerController::MAX_PER_PAGE`) |
 | `page` | integer | 1 | Page number |
-| `per_page` | integer | 20 | Items per page (max: 100, min: 1) |
 
-**Response (200):** Paginated customer objects.
+Example: `GET /api/customers?per_page=50&page=2`
+
+**Response (200):** Paginated customer objects (standard Laravel `paginate()` shape — see [Pagination](/enspace-crm/api-guidelines#pagination)).
+
+---
+
+### GET /api/customer
+
+A second route pointing at the same pagination logic as `GET /api/customers` (both call the private `paginateCustomers()` helper) — same `viewAny` authorization, same query parameters, same response shape. Exists as a distinct, custom-named endpoint alongside the `apiResource` route.
+
+**Query Parameters:** Same as `GET /api/customers` (`per_page`, default `20`, cap `500`; `page`).
+
+Example: `GET /api/customer?per_page=50&page=2`
+
+**Response (200):** Paginated customer objects, identical shape to `GET /api/customers`.
 
 ---
 
@@ -89,21 +103,6 @@ Updates a customer. Requires `update` policy authorization. All fields are optio
 Soft-deletes a customer. Requires `delete` policy authorization. Uses Eloquent's `SoftDeletes` — the record is marked with `deleted_at` and `deleted_by` but not removed from the database.
 
 **Response (204):** No content.
-
----
-
-### GET /api/customer
-
-Custom pagination endpoint that behaves identically to `GET /api/customers`. Requires `viewAny` policy authorization.
-
-**Query Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `page` | integer | 1 | Page number |
-| `per_page` | integer | 20 | Items per page (max: 100, min: 1) |
-
-**Response (200):** Paginated customer objects.
 
 ## Related Tables
 
