@@ -55,6 +55,7 @@ Creates a new user with a specified role. Requires `create` policy authorization
 | `phone_number` | string | No | |
 | `birth_date` | date | No | |
 | `is_active` | boolean | No | Default: `false` |
+| `theme` | string | No | Per-user theme preference. One of `BaseTheme::siteThemeValues()` — see [Site Settings](/enspace-crm/api/site-settings) |
 | `password` | string | Yes | Will be hashed |
 
 **Response (201):** Returns the created user.
@@ -80,6 +81,10 @@ Updates a user. Requires `update` policy authorization. The controller also vali
 **Request Body:** Same as `POST`, all fields optional.
 
 **Response (200):** Updated user object.
+
+:::note
+Self-edit (`authUser->id === targetUser->id`) is always allowed regardless of role — otherwise `Guest`/`Member`/`OS Staff`/etc. would fall through to the editable-roles check below, which never lists their own role, and they couldn't save even their own `theme`. Role changes on self-edit still go through `getAssignableRoles()`, so this is not a self-promotion hole.
+:::
 
 ---
 
@@ -175,7 +180,7 @@ The `UserPolicy` implements a role-based hierarchy with integer levels (Guest=0 
 
 #### update (Update User)
 
-Guests and Members can only update **themselves**. Higher roles can edit users within their assignable range.
+Every role can always update **themselves** (added so users can save personal fields like `theme` without needing edit permission over their own role). Beyond that, Guests and Members can only update themselves; higher roles can edit users within their assignable range.
 
 | Acting Role | Can Edit These Roles |
 |-------------|---------------------|

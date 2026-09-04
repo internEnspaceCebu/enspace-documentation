@@ -25,6 +25,7 @@ The intended authorization rules per resource, per operation (`C` = Create, `R` 
 | Services | EA | no security | EA | EA |
 | Units | EA | no security | EA | EA |
 | Contracts | EA | per member | EA | NO DELETE ALLOWED |
+| Site Settings | n/a (no create endpoint) | no security | Admin/SuperAdmin only | n/a (no delete endpoint) |
 
 ## Implemented Status
 
@@ -36,6 +37,7 @@ The intended authorization rules per resource, per operation (`C` = Create, `R` 
 | `customers` | `app/Policies/CustomerPolicy.php` | `CustomerController` — `$this->authorize()` on all 5 actions |
 | `bookings` | `app/Policies/BookingPolicy.php` | `BookingController` — `authorize()` on create/update/delete; read enforced via `BookingResource` masking (`viewFull`) |
 | `bookings_history` | `app/Policies/BookingPolicy.php` | `BookingHistoryController@index` — protected by `auth:sanctum` and authorized against the original booking with `viewFull` |
+| `site_settings` | `app/Policies/SiteSettingPolicy.php` | `SiteSettingController` — `authorize()` on `update` only; `show` is public and unauthenticated. Deliberately narrower than the usual `isPrivileged()` set — `Admin`/`SuperAdmin` only, no `before()` hook |
 
 :::note
 Policies are auto-discovered by naming convention (`XPolicy` matching the model). There is **no** `AuthServiceProvider` in the project.
@@ -90,6 +92,7 @@ Policies are auto-discovered by naming convention (`XPolicy` matching the model)
 | services | `ServicesController` | 4 — `auth:sanctum` | ❌ |
 | units | `UnitsController` | 4 — `auth:sanctum` | ❌ |
 | contracts | `ContractController` | 5 — public | ❌ |
+| site_settings | `SiteSettingController` | `GET` — 5 (public); `PATCH` — 4 (`auth:sanctum`) | ✅ (`PATCH` only; `GET` intentionally public) |
 
 ## Notes for Future Work
 

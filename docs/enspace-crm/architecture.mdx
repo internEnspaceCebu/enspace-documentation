@@ -17,9 +17,9 @@ All routes live in `routes/api.php` and are split into two groups:
 
 | Group | Middleware | Resources |
 |-------|-----------|-----------|
-| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`), `GET /bookings/{bookingId}/history` |
+| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`), `GET /bookings/{bookingId}/history`, `PATCH /site-settings` |
 | **Optional auth** | `OptionalAuthenticate` | `bookings`, `meeting-room-amenities` (incl. `POST /bookings/by-date-range`) |
-| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry`, `payments` (`POST /api/payment-intents`, `/attach`, `/api/webhook`) |
+| **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry`, `payments` (`POST /api/payment-intents`, `/attach`, `/api/webhook`), `GET /site-settings` |
 
 :::note
 Regular booking routes use optional authentication, but retrieving [Booking History](/enspace-crm/api/booking-history) requires `auth:sanctum` and authorization through `BookingPolicy::viewFull`.
