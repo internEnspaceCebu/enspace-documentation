@@ -1,0 +1,231 @@
+---
+sidebar_position: 4.5
+---
+
+# Booking History
+
+## Overview
+
+Booking History keeps a stored snapshot of a booking whenever that booking is **created**, **updated**, or **deleted**. Each snapshot is stored in the `bookings_history` table and connected to the original booking through `booking_id`.
+
+History entries are created automatically by the `Booking` model. Clients cannot manually create, update, or delete them through the API. The only Booking History endpoint is read-only.
+
+## Endpoint
+
+| Method | URI | Auth Required | Description |
+|--------|-----|:---:|-------------|
+| `GET` | `/api/bookings/{bookingId}/history` | Yes | Return the history entries connected to one booking |
+
+---
+
+### GET /api/bookings/{'{bookingId}'}/history
+
+Returns the history entries for the requested booking. Results are ordered by `logged_at` from newest to oldest and paginated at 20 entries per page.
+
+The original booking is queried with soft-deleted records included, so its history can still be retrieved after the booking has been soft-deleted.
+
+**Request Headers:**
+
+| Header | Required | Description |
+|--------|:---:|-------------|
+| `Authorization: Bearer <token>` | Yes | Laravel Sanctum authentication token |
+| `Accept: application/json` | Recommended | Requests a JSON response |
+
+**Path Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|:---:|-------------|
+| `bookingId` | integer | Yes | ID of the original booking |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | `1` | Pagination page number |
+
+**Example Request:**
+
+```http
+GET /api/bookings/15/history?page=1
+Authorization: Bearer 1|example-token
+Accept: application/json
+```
+
+**Response (200):**
+
+```json
+{
+  "current_page": 1,
+  "data": [
+    {
+      "id": 3,
+      "booking_id": 15,
+      "user_id": 8,
+      "customer_id": null,
+      "meeting_room_id": 2,
+      "booking_name": "Updated Team Meeting",
+      "booking_email": "member@example.com",
+      "booking_phone": "09123456789",
+      "start_at": "2031-01-15T02:00:00.000000Z",
+      "end_at": "2031-01-15T03:00:00.000000Z",
+      "buffer_before_meeting": 30,
+      "buffer_after_meeting": 30,
+      "total_amount": "400.00",
+      "custom_booking_price": null,
+      "booking_status": "Pending",
+      "payment_status": "No Payment",
+      "special_requests": null,
+      "action": "updated",
+      "action_by": 8,
+      "logged_at": "2031-01-10T06:30:00.000000Z"
+    }
+  ],
+  "first_page_url": "http://localhost/api/bookings/15/history?page=1",
+  "from": 1,
+  "last_page": 1,
+  "last_page_url": "http://localhost/api/bookings/15/history?page=1",
+  "links": [],
+  "next_page_url": null,
+  "path": "http://localhost/api/bookings/15/history",
+  "per_page": 20,
+  "prev_page_url": null,
+  "to": 1,
+  "total": 1
+}
+```
+
+:::note
+The URLs and timestamps shown above are examples. Laravel generates the actual pagination URLs from the environment handling the request and serializes the stored timestamps for the response.
+:::
+
+## Authentication and Authorization
+
+This endpoint is inside the `auth:sanctum` middleware group. Unlike the regular booking read endpoints, it does not allow guest access or return a masked response.
+
+After authentication, the controller authorizes the request through `BookingPolicy::viewFull`. The history can be viewed by:
+
+- The user who owns the booking
+- A user connected to the same non-null `customer_id`
+- A privileged employee or administrator allowed by the policy's `before()` check
+
+**Errors:**
+
+| Status | When |
+|:---:|------|
+| `401` | The request does not contain a valid authenticated session or bearer token |
+| `403` | The authenticated user is not allowed to view the original booking's full information |
+| `404` | No active or soft-deleted booking exists for `bookingId` |
+
+## History Actions
+
+| Action | When it is recorded | `action_by` value |
+|--------|---------------------|-------------------|
+| `created` | After a booking is inserted | The booking's `created_by` value |
+| `updated` | After a booking is updated | The booking's `updated_by` value |
+| `deleted` | After a booking is soft-deleted | The booking's `deleted_by` value |
+
+`action_by` is nullable because a booking may be changed without an authenticated user, such as through a console command, factory, seeder, or background process.
+
+:::note
+The booking delete endpoint first changes `booking_status` to `Cancelled` and then soft-deletes the booking. That request records an `updated` snapshot for the status change followed by a `deleted` snapshot.
+:::
+
+## How History Is Recorded
+
+The `Booking` model defines `created`, `updated`, and `deleted` model-event handlers in its `booted()` method. Each handler calls `recordHistory()`, which copies the booking's current values into a new `bookings_history` row.
+
+The history controller does not create these records. It only finds the original booking, checks authorization, and reads the booking's `histories()` relationship.
+
+:::caution
+History tracking depends on Eloquent model events. Changes made directly through SQL, or through database operations that do not dispatch individual model events, will not automatically create history entries.
+:::
+
+## `bookings_history` Table
+
+| Column | Type | Nullable | Description |
+|--------|------|:---:|-------------|
+| `id` | bigint | No | Primary key for the history entry |
+| `booking_id` | bigint (FK) | No | Original booking ID; references `bookings.id` with delete restricted |
+| `user_id` | bigint | No | Snapshot of the booking owner |
+| `customer_id` | bigint | Yes | Snapshot of the connected customer |
+| `meeting_room_id` | bigint | No | Snapshot of the meeting room |
+| `booking_name` | string | No | Snapshot of the booking name |
+| `booking_email` | string | No | Snapshot of the contact email |
+| `booking_phone` | string | No | Snapshot of the contact phone |
+| `start_at` | timestamp | No | Snapshot of the meeting start time |
+| `end_at` | timestamp | No | Snapshot of the meeting end time |
+| `buffer_before_meeting` | integer | Yes | Snapshot of the buffer before the meeting; default `30` |
+| `buffer_after_meeting` | integer | Yes | Snapshot of the buffer after the meeting; default `30` |
+| `total_amount` | decimal(10,2) | No | Snapshot of the total booking amount |
+| `custom_booking_price` | integer | Yes | Snapshot of the custom price |
+| `booking_status` | enum | No | Snapshot of the booking status |
+| `payment_status` | enum | No | Snapshot of the payment status |
+| `special_requests` | string | Yes | Snapshot of special requests |
+| `action` | enum | No | `created`, `updated`, or `deleted` |
+| `action_by` | bigint | Yes | ID of the user who caused the action; no foreign-key constraint |
+| `logged_at` | timestamp | No | Time the history snapshot was recorded; defaults to the current time |
+
+The table has a combined index on `booking_id` and `logged_at` to speed up retrieving a booking's history in time order.
+
+The table uses `logged_at` instead of Laravel's normal `created_at` and `updated_at` columns. The `BookingHistory` model therefore has `$timestamps = false`.
+
+## Relationships
+
+The models define both sides of the relationship:
+
+```php
+// Booking.php
+public function histories(): HasMany
+{
+    return $this->hasMany(BookingHistory::class);
+}
+```
+
+```php
+// BookingHistory.php
+public function booking(): BelongsTo
+{
+    return $this->belongsTo(Booking::class);
+}
+```
+
+```php
+booking_history (N) ──FK──> (1) booking 
+```
+
+A booking can have many history entries, while each history entry belongs to one original booking.
+
+Because `bookings_history.booking_id` uses `ON DELETE RESTRICT`, the original booking cannot be physically removed while history records still reference it. Normal booking deletion uses Laravel soft deletes, so the database row and its history remain available.
+
+## Models and Controller
+
+### Model: `BookingHistory`
+
+- **Table:** `bookings_history`
+- **Timestamps:** Disabled; uses `logged_at`
+- **Relationship:** `booking()` → `belongsTo(Booking::class)`
+- **Purpose:** Represents one stored booking snapshot
+
+### Controller: `BookingHistoryController`
+
+- **Method:** `index(int $bookingId)`
+- Finds active and soft-deleted bookings with `withTrashed()`
+- Authorizes access with `BookingPolicy::viewFull`
+- Retrieves entries through `histories()`
+- Orders entries by `logged_at` descending
+- Returns 20 entries per page
+- Does not provide write operations
+
+## Tests
+
+`tests/Feature/BookingHistoryControllerTest.php` verifies:
+
+- Creation produces a `created` history entry
+- Updating produces an `updated` history entry without changing the original snapshot
+- Soft deletion produces a `deleted` history entry
+- Only history for the requested booking is returned
+- History remains available for a soft-deleted booking
+- A different unauthorized user receives `403`
+- An unauthenticated user receives `401`
+
+The Postman collection at `tests/booking-history.postman_collection.json` covers login, create, update, delete, history retrieval, and unauthenticated access.

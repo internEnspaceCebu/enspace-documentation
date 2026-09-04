@@ -16,6 +16,7 @@ The intended authorization rules per resource, per operation (`C` = Create, `R` 
 | Users (mostly) | no security | per member, EA | per member, EA | per member, EA |
 | Customers | EA | per member | EA | EA |
 | Bookings | no security | per company/user details, EA | per user, EA | per user, EA |
+| Booking History | not exposed | per booking owner/customer, EA | not exposed | not exposed |
 | Ammenities pivot table | per user, EA | per user, EA | per user, EA | per user, EA |
 | Amenities | EA | no security | EA | EA |
 | Meeting rooms | EA | no security | EA | EA |
@@ -35,6 +36,7 @@ The intended authorization rules per resource, per operation (`C` = Create, `R` 
 | `users` | `app/Policies/UserPolicy.php` | `UserController` — `$this->authorize()` on all 5 actions |
 | `customers` | `app/Policies/CustomerPolicy.php` | `CustomerController` — `$this->authorize()` on all 5 actions |
 | `bookings` | `app/Policies/BookingPolicy.php` | `BookingController` — `authorize()` on create/update/delete; read enforced via `BookingResource` masking (`viewFull`) |
+| `bookings_history` | `app/Policies/BookingPolicy.php` | `BookingHistoryController@index` — protected by `auth:sanctum` and authorized against the original booking with `viewFull` |
 | `site_settings` | `app/Policies/SiteSettingPolicy.php` | `SiteSettingController` — `authorize()` on `update` only; `show` is public and unauthenticated. Deliberately narrower than the usual `isPrivileged()` set — `Admin`/`SuperAdmin` only, no `before()` hook |
 
 :::note
@@ -81,6 +83,7 @@ Policies are auto-discovered by naming convention (`XPolicy` matching the model)
 | users | `UserController` | 4 — `auth:sanctum` | ✅ |
 | customers | `CustomerController` | 4 — `auth:sanctum` | ✅ |
 | bookings | `BookingController` | 3 — `OptionalAuthenticate` | ✅ (C open by design; R masked via `BookingResource`, U/D owner-or-EA) |
+| bookings_history | `BookingHistoryController` | 4 — `auth:sanctum` | ✅ (read-only; `viewFull` authorization uses the original booking) |
 | `meeting_room_amenities_pivot` | `MeetingRoomAmenityController` / `MeetingRoomController` | 3 — `OptionalAuthenticate` | ❌ |
 | amenities | `MeetingRoomAmenityController` | 3 — `OptionalAuthenticate` | ❌ |
 | meeting_rooms | `MeetingRoomController` | 5 — public | ❌ |

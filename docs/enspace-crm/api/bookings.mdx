@@ -10,6 +10,8 @@ The Bookings resource manages meeting room reservations in the Enspace CRM. A bo
 
 Bookings have a **many-to-many relationship** with Meeting Room Amenities through the `booking_meeting_room_amenity` pivot table. When creating or updating a booking, you can specify which amenities are needed.
 
+Bookings also have an automatic history trail. Whenever a booking is created, updated, or deleted, a snapshot is stored in the `bookings_history` table. See [Booking History](./booking-history) for the endpoint, table structure, authorization rules, and tracking behavior.
+
 This resource uses **optional authentication** — guests can create bookings and view them, but authorization is enforced via `BookingPolicy`: read responses are masked unless you own the booking, belong to the same customer, or are EA (Employee/Admin); update and delete require ownership or EA.
 
 ## Endpoints
@@ -21,6 +23,7 @@ This resource uses **optional authentication** — guests can create bookings an
 | `GET` | `/api/bookings/{id}` | Optional | Retrieve a single booking — sensitive fields masked unless owner/EA |
 | `PUT/PATCH` | `/api/bookings/{id}` | Optional | Update a booking (owner or EA only) |
 | `DELETE` | `/api/bookings/{id}` | Optional | Delete a booking (owner or EA only) |
+| `GET` | `/api/bookings/{id}/history` | Yes | Retrieve the booking's history entries |
 | `POST` | `/api/bookings/by-date-range` | Optional | Find bookings within a date range — sensitive fields masked unless owner/EA |
 
 ---
@@ -79,6 +82,16 @@ Returns a single booking by ID.
 
 ---
 
+### GET /api/bookings/{'{id}'}/history
+
+Returns the history snapshots connected to the booking, ordered from newest to oldest and paginated at 20 entries per page.
+
+Unlike the regular booking read endpoints, this endpoint requires authentication. It uses `BookingPolicy::viewFull` for authorization and can retrieve history for a soft-deleted booking.
+
+See [Booking History](./booking-history) for the complete endpoint and response reference.
+
+---
+
 ### PUT/PATCH /api/bookings/{'{id}'}
 
 Updates a booking. All fields are optional. Amenities are **synced** (replaced) via `sync()`.
@@ -98,6 +111,11 @@ Cancels and soft-deletes a booking. Before deleting, the booking's `booking_stat
 **Authorization:** The requester must own the booking (`user_id` matches) or be EA. Otherwise `403`.
 
 **Response (204):** No content.
+
+Deleting through this endpoint normally records two history entries:
+
+1. An `updated` entry when `booking_status` changes to `Cancelled`
+2. A `deleted` entry when the booking is soft-deleted
 
 ---
 
@@ -124,6 +142,7 @@ Finds all bookings within a specified date range, ordered by `booking_date` asce
 | `meeting_rooms` | Indirect (FK) | `bookings.meeting_room_id` → `meeting_rooms.id` (`ON DELETE CASCADE`) |
 | `meeting_room_amenities` | Read/Write (pivot) | Many-to-many via `booking_meeting_room_amenity` |
 | `booking_payments` | Write (via [Booking Payments](./payments)) | `booking_payments.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
+| `bookings_history` | Read-only | Stores booking snapshots; `bookings_history.booking_id` → `bookings.id` (`ON DELETE RESTRICT`) |
 
 ### Relationship Diagram
 
@@ -133,6 +152,7 @@ bookings (N) ──FK──> (1) customers       [SET NULL on delete]
 bookings (N) ──FK──> (1) meeting_rooms   [CASCADE on delete]
 bookings (N) <──pivot──> (N) meeting_room_amenities
 bookings (1) <── referenced by ── (N) booking_payments   [RESTRICT on delete]
+bookings (1) <── referenced by ── (N) bookings_history  [RESTRICT on delete]
 ```
 
 :::note
@@ -147,7 +167,9 @@ Online payment intents for a booking are handled by the **Booking Payments** res
   - `customer()` → `belongsTo(Customer::class)`
   - `meetingRoom()` → `belongsTo(MeetingRoom::class)`
   - `meetingRoomAmenities()` → `belongsToMany(MeetingRoomAmenity::class)` with pivot `created_at`
+  - `histories()` → `hasMany(BookingHistory::class)`
 - **Audit hooks:** `booted()` auto-sets `created_by`/`updated_by`/`deleted_by` from `auth()->id()`, defaults `user_id` to the authenticated user, and fills `customer_id` from the user's company.
+- **History hooks:** `created`, `updated`, and `deleted` model events create snapshots in `bookings_history`.
 - **Accessor:** `booking_price` → returns `custom_booking_price` if set, else the meeting room's `hourly_rate`.
 - **Soft deletes:** Enabled
 
@@ -204,3 +226,16 @@ Conflict checks run on `store()` always, and on `update()` only when `meeting_ro
 
 :::note
 Audit fields are **no longer client-provided** — they are derived from the authenticated user by the `Booking` model's `booted()` hooks. There is no FK constraint on these columns.
+:::
+
+## Booking History
+
+The booking audit columns identify who created, most recently updated, or deleted the current booking record. Booking History is different: it stores a separate snapshot for every create, update, and delete event.
+
+| Booking audit columns | Booking History |
+|-----------------------|-----------------|
+| Stored on the current booking | Stored as separate rows in `bookings_history` |
+| Describe actions associated with the current booking record | Keeps multiple snapshots of the booking over time |
+| Uses `created_by`, `updated_by`, and `deleted_by` | Uses `action`, `action_by`, and `logged_at` |
+
+See [Booking History](./booking-history) for the complete documentation.

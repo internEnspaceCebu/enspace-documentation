@@ -17,9 +17,13 @@ All routes live in `routes/api.php` and are split into two groups:
 
 | Group | Middleware | Resources |
 |-------|-----------|-----------|
-| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`), `PATCH /site-settings` |
+| **Protected** | `auth:sanctum` | `customers`, `users`, **`services`**, **`units`** (incl. `GET /units/available`), `GET /bookings/{bookingId}/history`, `PATCH /site-settings` |
 | **Optional auth** | `OptionalAuthenticate` | `bookings`, `meeting-room-amenities` (incl. `POST /bookings/by-date-range`) |
 | **Public** | none | `meeting-rooms`, `contracts` (incl. `POST /contracts/used-hours`), `inquiry`, `payments` (`POST /api/payment-intents`, `/attach`, `/api/webhook`), `GET /site-settings` |
+
+:::note
+Regular booking routes use optional authentication, but retrieving [Booking History](/enspace-crm/api/booking-history) requires `auth:sanctum` and authorization through `BookingPolicy::viewFull`.
+:::
 
 :::danger
 Public resources can be read **and modified** by anyone without authentication. This is documented per-resource but should be restricted in production.
@@ -31,7 +35,7 @@ Public resources can be read **and modified** by anyone without authentication. 
 |-------|----------|----------------|
 | Routes | `routes/api.php` | URL → controller mapping, middleware |
 | Controllers | `app/Http/Controllers/` | Thin HTTP layer: validate, call models, return JSON |
-| Models | `app/Models/` | Table access, relationships, casts, accessors |
+| Models | `app/Models/` | Table access, relationships, casts, accessors, and model-event behavior |
 | Enums | `app/Enums/` | Single source of truth for status/type values |
 | Migrations | `database/migrations/` | Versioned schema changes |
 | Seeders | `database/seeders/` | Reference/dev data |
@@ -59,6 +63,9 @@ Each enum exposes:
 | `services` | **Soft delete** — sets `deleted_at` + `deleted_by`; 409 if contracts still attached |
 | `units` | **Soft delete** — sets `deleted_at` + `deleted_by` (no guard for assigned contracts) |
 | `contracts` | **Deletion fully blocked** — model `boot()` throws `LogicException`; use `status` instead |
+| `bookings` | **Soft delete** — first changes `booking_status` to `Cancelled`, then preserves the booking row and its history |
+
+Deleting a booking through its API endpoint normally creates an `updated` history snapshot for the status change followed by a `deleted` history snapshot for the soft delete.
 
 :::note
 For soft-deleted parents, `nullOnDelete()` on the FK only fires on **hard** deletes. Controllers compensate manually — e.g. `ServicesController::destroy` nulls `units.service_id` before soft-deleting.
@@ -72,6 +79,7 @@ For soft-deleted parents, `nullOnDelete()` on the FK only fires on **hard** dele
 | `contracts.service_id` | `restrictOnDelete` | A service with contracts **cannot** be deleted |
 | `contracts.customer_id` | `restrict` | A customer with contracts cannot be deleted |
 | `contracts.unit_id` | `nullOnDelete` | Deleting a unit nulls the link instead of deleting contracts |
+| `bookings_history.booking_id` | `restrictOnDelete` | Prevents physically deleting a booking while history entries reference it; soft deletion remains available |
 
 ### Audit columns
 
@@ -110,6 +118,7 @@ meeting_rooms (1) ──< bookings (N)      bookings reference a room
 bookings (N) ──< booking_meeting_room_amenity >── (N) meeting_room_amenities
 contracts (1) ──< bookings (N)          hours/credits are tracked per contract
 bookings (1) ──< payments (N)           online payment intents belong to a booking
+bookings (1) ──< bookings_history (N)    one booking has many history snapshots
 ```
 
 ## Cross-Cutting Behaviors
